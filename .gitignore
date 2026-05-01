@@ -1,0 +1,12 @@
+node_modules/
+data/portfolio-analysis.*
+extracted-statement.txt
+monopo-dashboard-upload.png
+*.pdf
+*.png
+*.csv
+*.xlsx
+.env
+.env.*
+scripts/extract-pdf-lines.swift
+.DS_Store
