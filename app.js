@@ -13,7 +13,7 @@ const ChartKit = window.ChartKit;
 let data = null;
 const uploadState = {
   status: 'idle',
-  message: 'Dépose ton relevé Trade Republic PDF pour lancer l’analyse.',
+  message: 'Dépose ton Transaction export.csv ou ton relevé PDF Trade Republic pour lancer l’analyse.',
   fileName: '',
   fileSize: 0,
 };
@@ -60,11 +60,34 @@ function portfolioDashboard() {
           <small>Tout reste dans ton navigateur. Aucune API, aucun upload serveur.</small>
         </label>
       </section>
+      ${renderCsvExportGuide()}
       <section class="panel-grid three upload-notes">
         ${uploadNote('Static build', 'Compatible GitHub Pages: HTML, CSS, JS, PDF.js vendored.')}
         ${uploadNote('CSV 23/23', 'Chaque colonne exportée est parsée, typée et auditée en couverture.')}
         ${uploadNote('Trading first', 'Le CSV pilote les métriques d’ordres, positions, frais et P/L réalisé FIFO.')}
       </section>`;
+  }
+
+  function renderCsvExportGuide() {
+    return `
+      <section class="export-guide terminal-window" aria-labelledby="csv-export-title">
+        <div class="terminal-toolbar"><i></i><i></i><i></i><span>trade-republic/export</span></div>
+        <div class="export-guide-copy">
+          <span class="terminal-prompt">howto transaction_export.csv</span>
+          <h2 id="csv-export-title">Exporter le bon CSV.</h2>
+          <p>Pour l’analyse trading complète, importe le fichier Transaction export avec toute la période sélectionnée.</p>
+        </div>
+        <ol class="export-steps">
+          ${tutorialStep('01', 'Ouvre Trade Republic', 'Va dans la zone Statements / Documents depuis ton compte.')}
+          ${tutorialStep('02', 'Lance Transaction export', 'Choisis l’export des transactions, pas seulement un account statement PDF.')}
+          ${tutorialStep('03', 'Sélectionne tout', 'Prends toute la période disponible et toutes les catégories si l’écran te le propose.')}
+          ${tutorialStep('04', 'Télécharge le CSV', 'Récupère Transaction export.csv puis dépose-le ici pour générer le rapport trading.')}
+        </ol>
+      </section>`;
+  }
+
+  function tutorialStep(number, title, body) {
+    return `<li><span>${esc(number)}</span><div><strong>${esc(title)}</strong><p>${esc(body)}</p></div></li>`;
   }
 
   function uploadNote(title, body) {

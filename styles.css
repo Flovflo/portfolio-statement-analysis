@@ -465,6 +465,101 @@ th,
   margin-top: var(--spacing-20);
 }
 
+.export-guide {
+  display: grid;
+  grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+  gap: var(--spacing-16);
+  margin-top: var(--spacing-10);
+  padding: var(--spacing-16);
+  border-radius: var(--radius-largecards);
+}
+
+.export-guide .terminal-toolbar {
+  grid-column: 1 / -1;
+}
+
+.export-guide-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  padding: var(--spacing-8);
+}
+
+.export-guide-copy .terminal-prompt {
+  margin-top: 0;
+}
+
+.export-guide h2 {
+  margin-top: var(--spacing-12);
+  color: var(--color-near-white);
+  font-family: var(--font-instrument-serif);
+  font-size: var(--text-heading);
+  font-weight: 400;
+  line-height: var(--leading-heading);
+  letter-spacing: -0.02em;
+}
+
+.export-guide-copy p {
+  max-width: 430px;
+  margin-top: var(--spacing-12);
+  color: var(--color-ash-gray);
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.export-steps {
+  display: grid;
+  gap: var(--spacing-10);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.export-steps li {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  gap: var(--spacing-12);
+  align-items: start;
+  min-width: 0;
+  padding: var(--spacing-12);
+  border: 1px solid var(--border-quiet);
+  border-radius: var(--radius-cards);
+  background: rgba(0, 0, 0, 0.26);
+}
+
+.export-steps li > span {
+  display: inline-flex;
+  width: 42px;
+  height: 42px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-smallelements);
+  background: var(--color-sea-glass);
+  color: var(--color-electric-aqua);
+  box-shadow: 0 0 0 1px rgba(25, 208, 232, 0.2) inset;
+  font-family: var(--font-dm-mono);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.export-steps strong {
+  display: block;
+  color: var(--color-near-white);
+  font-family: var(--font-dm-mono);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.25;
+}
+
+.export-steps p {
+  margin-top: var(--spacing-6);
+  color: var(--color-ash-gray);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 .tabs {
   position: sticky;
   top: var(--spacing-10);
@@ -872,6 +967,7 @@ td span {
 
   .kpi-grid,
   .kpi-grid.compact,
+  .export-guide,
   .panel-grid.two,
   .panel-grid.three {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -935,9 +1031,19 @@ td span {
 
   .kpi-grid,
   .kpi-grid.compact,
+  .export-guide,
   .panel-grid.two,
   .panel-grid.three {
     grid-template-columns: 1fr;
+  }
+
+  .export-guide {
+    padding: var(--spacing-12);
+    border-radius: 32px;
+  }
+
+  .export-steps li {
+    grid-template-columns: 46px minmax(0, 1fr);
   }
 
   .kpi {

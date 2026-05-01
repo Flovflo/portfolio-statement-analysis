@@ -12,6 +12,8 @@ python3 -m http.server 8765
 
 Ouvre ensuite `http://127.0.0.1:8765/index.html`, importe le PDF ou `Transaction export.csv`, puis l’analyse se calcule côté navigateur.
 
+Pour exporter le CSV Trade Republic: ouvre `Statements / Documents`, choisis `Transaction export`, sélectionne toute la période et toutes les catégories disponibles, puis télécharge `Transaction export.csv`.
+
 ## Contrat de données
 
 Le rapport affiche uniquement:
