@@ -43,26 +43,26 @@ function portfolioDashboard() {
     return `
       <section class="upload-hero">
         <div class="upload-copy">
-          <div class="meta-line">Analyse locale · PDF jamais envoyé · GitHub Pages ready</div>
-          <h1>Importe ton relevé, le navigateur calcule tout</h1>
-          <p>Le site extrait le texte du PDF côté client, reconstruit les transactions Trade Republic, rapproche les totaux, puis génère les graphiques et l’analyse.</p>
+          <h1>Terminal privé pour décoder ton relevé.</h1>
+          <p>Un parseur local lit le PDF dans ton navigateur, reconstruit les flux, rapproche les soldes, puis affiche uniquement les données trouvées ou calculées.</p>
           <div class="upload-status ${uploadState.status}">
             <strong>${esc(statusTitle())}</strong>
             <span>${esc(uploadState.message)}</span>
             ${busy ? '<progress max="100"></progress>' : ''}
           </div>
         </div>
-        <label class="drop-zone" for="pdf-file" data-drop-zone>
+        <label class="drop-zone terminal-window" for="pdf-file" data-drop-zone>
+          <div class="terminal-toolbar"><i></i><i></i><i></i><span>local-parser</span></div>
           <input id="pdf-file" data-pdf-input type="file" accept="application/pdf,.pdf" ${busy ? 'disabled' : ''} />
-          <span>PDF Trade Republic</span>
-          <strong>Choisir ou déposer le relevé</strong>
+          <span class="terminal-prompt">run statement.pdf</span>
+          <strong>Choisir ou déposer le PDF</strong>
           <small>Tout reste dans ton navigateur. Aucune API, aucun upload serveur.</small>
         </label>
       </section>
       <section class="panel-grid three upload-notes">
-        ${uploadNote('100 % statique', 'Compatible GitHub Pages: HTML, CSS, JS, PDF.js vendored.')}
-        ${uploadNote('Même syntaxe PDF', 'Optimisé pour les relevés Trade Republic du même format.')}
-        ${uploadNote('Audit intégré', 'Les entrées, sorties et solde final sont rapprochés automatiquement.')}
+        ${uploadNote('Static build', 'Compatible GitHub Pages: HTML, CSS, JS, PDF.js vendored.')}
+        ${uploadNote('Même format', 'Optimisé pour les relevés Trade Republic avec la même syntaxe PDF.')}
+        ${uploadNote('Audit local', 'Entrées, sorties et solde final sont rapprochés automatiquement.')}
       </section>`;
   }
 
@@ -83,14 +83,22 @@ function portfolioDashboard() {
     return `
       <header class="topbar">
         <div class="title-block">
-          <div class="meta-line">Trade Republic · ${esc(data.summary.periodLabel)} · ${data.summary.transactionCount} transactions</div>
-          <h1>Rapport comptable du relevé</h1>
-          <p>Le rapport affiche uniquement les champs lus dans le PDF ou les calculs dérivés des soldes, dates, montants, libellés et ISIN extraits.</p>
+          <div class="meta-line">Trade Republic / ${esc(data.summary.periodLabel)}</div>
+          <h1>Rapport comptable du relevé.</h1>
+          <p>Un rapport strict: champs lus dans le PDF, calculs dérivés des soldes, dates, montants, libellés et ISIN extraits. Rien d’inventé.</p>
         </div>
         <div class="header-actions">
-          <div class="audit-pill ${ok ? 'is-ok' : 'is-warning'}">
-            <span>Rapprochement relevé</span>
-            <strong>${ok ? '0,00 € d’écart' : 'écart détecté'}</strong>
+          <div class="terminal-window terminal-readout">
+            <div class="terminal-toolbar"><i></i><i></i><i></i><span>audit.log</span></div>
+            <div class="audit-pill ${ok ? 'is-ok' : 'is-warning'}">
+              <span>reconcile --statement</span>
+              <strong>${ok ? 'OK · 0,00 €' : 'Écart détecté'}</strong>
+            </div>
+            <div class="terminal-matrix">
+              <div><span>tx</span><strong>${int(data.summary.transactionCount)}</strong></div>
+              <div><span>pages</span><strong>${int(data.coverage.pageCount || 0)}</strong></div>
+              <div><span>isin</span><strong>${int(data.coverage.assetCount)}</strong></div>
+            </div>
           </div>
           <label class="replace-file">
             <input data-pdf-input type="file" accept="application/pdf,.pdf" />
@@ -109,7 +117,7 @@ function portfolioDashboard() {
       ['controls', 'Contrôles'],
       ['transactions', 'Transactions'],
     ];
-    return `<nav class="tabs">${tabs.map(([id, label]) => `<button class="${state.tab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join('')}</nav>`;
+    return `<nav class="tabs" aria-label="Sections du rapport">${tabs.map(([id, label]) => `<button class="${state.tab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join('')}</nav>`;
   }
 
   function renderActiveTab() {
@@ -407,7 +415,7 @@ function portfolioDashboard() {
   function renderCharts() {
     const metrics = derivedMetrics();
     mount('monthly-flow', flowChart());
-    mount('cash-line', ChartKit.lineChart(data.monthly, { key: 'endBalance', color: '#16c253', label: (m) => shortMonth(m.month) }));
+    mount('cash-line', ChartKit.lineChart(data.monthly, { key: 'endBalance', color: '#19d0e8', label: (m) => shortMonth(m.month) }));
     mount('category-donut', categoryDonut(metrics));
     mountLegend('legend-category', metrics.operationBreakdown);
     mount('top-assets', ChartKit.horizontalBars(topAssetItems(metrics).slice(0, 12), { format: eur }));
@@ -415,7 +423,7 @@ function portfolioDashboard() {
     mount('concentration-bars', ChartKit.horizontalBars(concentrationItems().slice(0, 15), { format: (v) => `${formatNumber.format(v)} %` }));
     mount('buy-heatmap', ChartKit.heatmap(data.monthly));
     mount('deployment-bars', deploymentChart());
-    mount('monthly-cash-bars', ChartKit.barChart(data.monthly, { series: [{ key: 'endBalance', color: '#16c253' }], label: (m) => shortMonth(m.month) }));
+    mount('monthly-cash-bars', ChartKit.barChart(data.monthly, { series: [{ key: 'endBalance', color: '#19d0e8' }], label: (m) => shortMonth(m.month) }));
     mount('income-bars', incomeChart());
     mount('merchant-bars', ChartKit.horizontalBars(data.merchants.map((m) => ({ label: m.merchant, value: m.amount })), { format: eur }));
   }
@@ -423,9 +431,9 @@ function portfolioDashboard() {
   function flowChart() {
     return ChartKit.barChart(data.monthly, {
       series: [
-        { key: 'deposits', color: '#16c253' },
-        { key: 'buys', color: '#0088ff' },
-        { key: 'cardSpend', color: '#e6714f' },
+        { key: 'deposits', color: '#19d0e8' },
+        { key: 'buys', color: '#44ccff' },
+        { key: 'cardSpend', color: '#ffffff' },
       ],
       label: (m) => shortMonth(m.month),
     });
@@ -434,9 +442,9 @@ function portfolioDashboard() {
   function incomeChart() {
     return ChartKit.barChart(data.monthly, {
       series: [
-        { key: 'dividends', color: '#16c253' },
+        { key: 'dividends', color: '#19d0e8' },
         { key: 'interest', color: '#ffffff' },
-        { key: 'bonus', color: '#ffb764' },
+        { key: 'bonus', color: '#44ccff' },
       ],
       label: (m) => shortMonth(m.month),
     });
