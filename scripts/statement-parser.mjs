@@ -21,6 +21,8 @@ const CURRENCY_PATTERN = /(?<![\d.])-?(?:\d{1,3}(?: \d{3})+|\d+),\d{2}\s*€/g;
 const HONORIFIC_PERSON_PATTERN =
   /\b(?:M|MME|MLLE|MR|MRS|MS|MONSIEUR|MADAME)\.?\s+[A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ'-]+(?:\s+[A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ'-]+){1,3}\b/g;
 const BANK_ID_NAME_PATTERN = /\b[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'-]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'-]+){1,3}\b(?=.*\b(?:IBAN|BIC|TRBK)\b)/g;
+const TRANSFER_FROM_NAME_PATTERN =
+  /\b(from|de)\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'-]+(?:\s+[A-ZÀ-ÖØ-Þ][a-zà-öø-ÿ'-]+){1,3}\b(?=.*(?:[A-Z]{2}\d{2}[A-Z0-9]{10,30}|\bIBAN\b|\bBIC\b|\bTRBK\b))/gi;
 
 const CRYPTO_NAMES = {
   XF000BTC0017: 'Bitcoin',
@@ -67,21 +69,12 @@ export function extractStatementMeta(lines) {
 
   return {
     periodLabel: period?.[1] ?? '',
-    openingBalance: summary ? parseCurrency(summary[1]) : 0,
+    pageCount: new Set(lines.map((line) => line.page)).size,
+    extractedLineCount: lines.length,
+    openingBalance: summary ? parseCurrency(summary[1]) : null,
     expectedInflows: summary ? parseCurrency(summary[2]) : null,
     expectedOutflows: summary ? parseCurrency(summary[3]) : null,
     expectedFinalBalance: summary ? parseCurrency(summary[4]) : null,
-  };
-}
-
-export function classifyInstrument(isin, name = '') {
-  const cleanName = normalizeSpaces(name).toUpperCase();
-  const cryptoName = CRYPTO_NAMES[isin];
-  const instrumentClass = instrumentClassFor(isin, cleanName);
-
-  return {
-    class: instrumentClass,
-    theme: instrumentThemeFor(isin, cleanName, instrumentClass, cryptoName),
   };
 }
 
@@ -93,7 +86,8 @@ export function buildAnalysis(transactions, meta = {}) {
   const categories = buildCategoryBreakdown(enriched);
   const merchants = buildMerchantBreakdown(enriched);
   const diagnostics = buildDiagnostics(summary, meta);
-  const insights = buildInsights(summary, monthly, assets, categories);
+  const coverage = buildCoverage(enriched, assets, meta, diagnostics);
+  const audit = buildAudit(summary, meta, diagnostics, coverage);
 
   return {
     generatedAt: new Date().toISOString(),
@@ -104,7 +98,8 @@ export function buildAnalysis(transactions, meta = {}) {
     categories,
     merchants,
     diagnostics,
-    insights,
+    coverage,
+    audit,
     transactions: enriched,
   };
 }
@@ -184,7 +179,6 @@ function parseBlock(rows, previousBalance, sequence) {
     date,
     month: date.slice(0, 7),
     description: sanitizeSensitive(description),
-    rawDescription: description,
     balance,
     signedAmount,
     amount: Math.abs(signedAmount),
@@ -263,24 +257,16 @@ function extractAsset(description) {
   const isin = match[0];
   const name = cleanAssetName(description.slice(match.index + isin.length), isin);
   const quantity = Number.parseFloat(description.match(/quantity:\s*([0-9.]+)/i)?.[1] ?? '');
-  const classification = classifyInstrument(isin, name);
 
   return {
     isin,
     name,
-    ...classification,
     ...(Number.isFinite(quantity) ? { quantity } : {}),
   };
 }
 
 function extractSyntheticAsset(description) {
-  if (!/private markets/i.test(description)) return null;
-  return {
-    isin: 'PRIVATE_MARKETS',
-    name: 'Private Markets',
-    class: 'Private Markets',
-    theme: 'Private markets',
-  };
+  return null;
 }
 
 function cleanAssetName(rawName, isin) {
@@ -310,16 +296,22 @@ function buildSummary(transactions, meta) {
 
   return {
     periodLabel: meta.periodLabel ?? '',
+    openingBalance: meta.openingBalance ?? null,
+    expectedInflows: meta.expectedInflows ?? null,
+    expectedOutflows: meta.expectedOutflows ?? null,
+    expectedFinalBalance: meta.expectedFinalBalance ?? null,
     firstDate,
     lastDate,
     transactionCount: transactions.length,
     totalInflows,
     totalOutflows,
+    netCashFlow: roundMoney(totalInflows - totalOutflows),
     finalBalance: transactions.at(-1)?.balance ?? 0,
     totalDeposits: sumKind('deposit'),
     totalWithdrawals: sumKind('withdrawal'),
     totalBuys: sumKind('buy'),
     totalSells: sumKind('sell'),
+    netInvested: roundMoney(sumKind('buy') - sumKind('sell')),
     passiveIncome: sumKind('dividend') + sumKind('interest'),
     dividends: sumKind('dividend'),
     interest: sumKind('interest'),
@@ -362,13 +354,12 @@ function buildAssets(transactions) {
 
 function assetSummary(isin, items) {
   const sample = items.find((item) => item.asset.name !== isin)?.asset ?? items[0].asset;
-  const quantityKnown = sum(items.map((item) => quantityImpact(item)));
+  const quantityDelta = sumQuantity(items.map((item) => quantityImpact(item)));
+  const quantityRows = items.filter((item) => Number.isFinite(item.asset?.quantity)).length;
 
   return {
     isin,
     name: sample.name,
-    class: sample.class,
-    theme: sample.theme,
     buyAmount: sumKind(items, 'buy'),
     sellAmount: sumKind(items, 'sell'),
     dividendAmount: sumKind(items, 'dividend'),
@@ -376,7 +367,11 @@ function assetSummary(isin, items) {
     transactionCount: items.length,
     buyCount: items.filter((item) => item.kind === 'buy').length,
     sellCount: items.filter((item) => item.kind === 'sell').length,
-    quantityKnown: roundQuantity(quantityKnown),
+    dividendCount: items.filter((item) => item.kind === 'dividend').length,
+    quantityDelta,
+    quantityRows,
+    firstDate: items[0]?.date ?? null,
+    lastDate: items.at(-1)?.date ?? null,
   };
 }
 
@@ -402,96 +397,57 @@ function buildDiagnostics(summary, meta) {
   };
 }
 
-function buildInsights(summary, monthly, assets, categories) {
-  const positiveAssets = assets.filter((asset) => asset.netInvested > 0);
-  const topAsset = positiveAssets[0];
-  const topFiveWeight = sum(positiveAssets.slice(0, 5).map((asset) => asset.weight));
-  const activeMonths = monthly.filter((month) => month.buys > 0).length;
-
-  return [
-    concentrationInsight(topAsset, topFiveWeight),
-    dcaInsight(summary, monthly, activeMonths),
-    themeInsight(positiveAssets),
-    incomeInsight(summary),
-    cashUseInsight(summary, categories),
-    dataLimitInsight(),
-  ];
+function buildCoverage(transactions, assets, meta, diagnostics) {
+  const assetTransactions = transactions.filter((transaction) => transaction.asset?.isin);
+  return {
+    pageCount: meta.pageCount ?? null,
+    extractedLineCount: meta.extractedLineCount ?? null,
+    assetCount: assets.length,
+    transactionsWithIsin: assetTransactions.length,
+    transactionsWithQuantity: assetTransactions.filter((transaction) => Number.isFinite(transaction.asset?.quantity)).length,
+    unknownTransactionCount: transactions.filter((transaction) => transaction.kind.startsWith('other')).length,
+    reconciled: [diagnostics.inflowDiff, diagnostics.outflowDiff, diagnostics.finalBalanceDiff]
+      .filter((value) => value !== null)
+      .every((value) => Math.abs(value) <= 0.01),
+  };
 }
 
-function concentrationInsight(topAsset, topFiveWeight) {
-  if (!topAsset) return insight('Concentration', 'warning', 'Aucun coût de portefeuille net positif exploitable.');
-  return insight(
-    'Concentration',
-    topFiveWeight > 70 ? 'warning' : 'neutral',
-    `Les 5 premières lignes représentent ${formatPercent(topFiveWeight)} du coût net investi. La première ligne est ${topAsset.name} (${formatPercent(topAsset.weight)}).`,
-  );
+function buildAudit(summary, meta, diagnostics, coverage) {
+  return {
+    direct: [
+      auditItem('period', 'Période du relevé', meta.periodLabel || 'Non trouvée', 'En-tête DATE du PDF'),
+      auditItem('openingBalance', 'Solde initial', meta.openingBalance, 'Bloc Compte courant du PDF'),
+      auditItem('expectedInflows', 'Entrées déclarées', meta.expectedInflows, 'Bloc Compte courant du PDF'),
+      auditItem('expectedOutflows', 'Sorties déclarées', meta.expectedOutflows, 'Bloc Compte courant du PDF'),
+      auditItem('expectedFinalBalance', 'Solde final déclaré', meta.expectedFinalBalance, 'Bloc Compte courant du PDF'),
+      auditItem('pages', 'Pages lues', coverage.pageCount, 'PDF chargé dans le navigateur'),
+    ],
+    calculated: [
+      auditFormula('transactionAmounts', 'Montant de chaque transaction', 'solde après transaction - solde précédent', summary.transactionCount),
+      auditFormula('monthlyTotals', 'Totaux mensuels', 'somme des transactions par mois et par type', null),
+      auditFormula('assetCost', 'Coût net par ISIN', 'achats portefeuille - ventes portefeuille pour chaque ISIN trouvé', coverage.assetCount),
+      auditFormula('reconciliation', 'Rapprochement comptable', `écarts: entrées ${diagnostics.inflowDiff}, sorties ${diagnostics.outflowDiff}, solde ${diagnostics.finalBalanceDiff}`, null),
+    ],
+    unavailable: [
+      unavailableItem('marketValue', 'Valeur de marché actuelle', 'absente du relevé de compte'),
+      unavailableItem('unrealizedPnl', 'Plus-value ou moins-value latente', 'cours actuels et prix de revient fiscal non fournis'),
+      unavailableItem('currentAllocation', 'Allocation réelle actuelle', 'le PDF donne des flux cash, pas les valorisations de positions'),
+      unavailableItem('taxReturn', 'Déclaration fiscale complète', 'les lignes de taxes visibles ne suffisent pas à produire une déclaration'),
+      unavailableItem('riskScore', 'Score de risque ou avis expert', 'aucun prix de marché, volatilité ou profil investisseur dans le PDF'),
+    ],
+  };
 }
 
-function dcaInsight(summary, monthly, activeMonths) {
-  const averageBuy = monthly.length ? summary.totalBuys / monthly.length : 0;
-  return insight(
-    'Rythme d’investissement',
-    activeMonths / Math.max(monthly.length, 1) > 0.65 ? 'positive' : 'neutral',
-    `${activeMonths} mois avec achats sur ${monthly.length}. Achat moyen mensuel: ${formatEuro(averageBuy)}.`,
-  );
+function auditItem(key, label, value, source) {
+  return { key, label, value, source, basis: 'pdf' };
 }
 
-function themeInsight(assets) {
-  const byTheme = groupBy(assets, (asset) => asset.theme);
-  const themes = [...byTheme.entries()]
-    .map(([theme, items]) => ({ theme, weight: sum(items.map((item) => item.weight)) }))
-    .sort((a, b) => b.weight - a.weight);
-  const leader = themes[0];
-  return insight('Exposition dominante', 'neutral', leader ? `${leader.theme} pèse ${formatPercent(leader.weight)} du coût net.` : 'Pas de thème dominant mesurable.');
+function auditFormula(key, label, formula, count) {
+  return { key, label, formula, count, basis: 'calculated' };
 }
 
-function incomeInsight(summary) {
-  const base = Math.max(summary.totalBuys - summary.totalSells, 1);
-  return insight(
-    'Revenus cash',
-    'positive',
-    `Dividendes + intérêts: ${formatEuro(summary.passiveIncome)}, soit ${formatPercent((summary.passiveIncome / base) * 100)} du coût net investi cumulé.`,
-  );
-}
-
-function cashUseInsight(summary, categories) {
-  const card = categories.find((item) => item.category === 'Dépenses carte');
-  return insight(
-    'Friction cash',
-    summary.cardSpend > summary.totalBuys * 0.25 ? 'warning' : 'neutral',
-    `Dépenses carte détectées: ${formatEuro(card?.amount ?? 0)}. Elles doivent être séparées mentalement du portefeuille pour lire correctement les apports.`,
-  );
-}
-
-function dataLimitInsight() {
-  return insight(
-    'Limite de lecture',
-    'warning',
-    "Ce relevé décrit les flux cash. Il ne donne pas la valeur de marché actuelle des positions, donc l'allocation affichée est un coût net estimé, pas une performance.",
-  );
-}
-
-function instrumentClassFor(isin, cleanName) {
-  if (CRYPTO_NAMES[isin]) return 'Crypto';
-  if (/SG EFF\.? TRACK|EFF\.? TRACK|0% SG/.test(cleanName)) return 'Produit structuré / ETP';
-  if (/ETF|UCITS|ISH|AMUNDI|LYX|XTRACKERS|VANECK|MSCI|S&P|S\+P|S P|S-?500|500INF|NA100|NASDAQ|WITR|MUL AMUN/.test(cleanName)) return 'ETF / ETP';
-  return 'Action';
-}
-
-function instrumentThemeFor(isin, cleanName, instrumentClass, cryptoName) {
-  if (cryptoName) return 'Crypto';
-  if (/SEMICON|NVIDIA|ADVANCED MIC|AMD|TAIWAN SEMICON|SIVERS|MICRON|QUALCOMM|ADVANTEST/.test(cleanName)) return 'Semi-conducteurs / IA';
-  if (/THERAPEUT|CRISPR|INTELLIA|BIOTECH|HEALTH/.test(cleanName)) return 'Santé / biotech';
-  if (/AI|BIG DATA/.test(cleanName)) return 'IA / données';
-  if (/DEFENSE|DEFENCE/.test(cleanName)) return 'Défense';
-  if (/URANIUM|NUCLEAR/.test(cleanName)) return 'Uranium / nucléaire';
-  if (/CLEAN|ENERGY|TOTALENERGIES/.test(cleanName)) return 'Energie';
-  if (/MSCI WLD|MSCI WORLD|S&P|S\+P|S P|S-?500|GLOBAL|WLD/.test(cleanName)) return 'Indices globaux';
-  if (/NA100|NASDAQ/.test(cleanName)) return 'Nasdaq / croissance';
-  if (instrumentClass === 'ETF / ETP') return 'ETF thématique';
-  if (isin.startsWith('FR')) return 'Actions France';
-  if (isin.startsWith('US')) return 'Actions US';
-  return 'Autres';
+function unavailableItem(key, label, reason) {
+  return { key, label, reason, basis: 'unavailable' };
 }
 
 function enrichAssetNames(transactions) {
@@ -529,9 +485,10 @@ function cleanDescription(description) {
 function sanitizeSensitive(description) {
   return description
     .replace(HONORIFIC_PERSON_PATTERN, 'Compte personnel')
+    .replace(TRANSFER_FROM_NAME_PATTERN, '$1 Compte personnel')
     .replace(BANK_ID_NAME_PATTERN, 'Compte personnel')
     .replace(/\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/g, '[IBAN masqué]')
-    .replace(/\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/g, '[BIC masqué]')
+    .replace(/\bBIC\s+[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/gi, 'BIC [BIC masqué]')
     .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '[id masqué]');
 }
 
@@ -602,6 +559,10 @@ function roundQuantity(value) {
   return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
 
+function sumQuantity(values) {
+  return roundQuantity(values.reduce((total, value) => total + (Number.isFinite(value) ? value : 0), 0));
+}
+
 function percent(value, total) {
   return total > 0 ? (value / total) * 100 : 0;
 }
@@ -612,16 +573,4 @@ function sumPositiveNetInvested(assets) {
 
 function diffOrNull(actual, expected) {
   return expected === null || expected === undefined ? null : roundMoney(actual - expected);
-}
-
-function insight(title, tone, body) {
-  return { title, tone, body };
-}
-
-function formatEuro(value) {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(value);
-}
-
-function formatPercent(value) {
-  return `${new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(value)} %`;
 }

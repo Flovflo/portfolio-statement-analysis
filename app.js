@@ -84,8 +84,8 @@ function portfolioDashboard() {
       <header class="topbar">
         <div class="title-block">
           <div class="meta-line">Trade Republic · ${esc(data.summary.periodLabel)} · ${data.summary.transactionCount} transactions</div>
-          <h1>Analyse profonde du portefeuille</h1>
-          <p>Lecture cash-flow, coût net investi, concentration, rythme d’achat, revenus, friction carte et limites de valorisation.</p>
+          <h1>Rapport comptable du relevé</h1>
+          <p>Le rapport affiche uniquement les champs lus dans le PDF ou les calculs dérivés des soldes, dates, montants, libellés et ISIN extraits.</p>
         </div>
         <div class="header-actions">
           <div class="audit-pill ${ok ? 'is-ok' : 'is-warning'}">
@@ -103,18 +103,20 @@ function portfolioDashboard() {
   function renderTabs() {
     const tabs = [
       ['overview', 'Synthèse'],
-      ['allocation', 'Allocation'],
+      ['instruments', 'Instruments'],
       ['flows', 'Flux'],
       ['income', 'Revenus & frais'],
+      ['controls', 'Contrôles'],
       ['transactions', 'Transactions'],
     ];
     return `<nav class="tabs">${tabs.map(([id, label]) => `<button class="${state.tab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`).join('')}</nav>`;
   }
 
   function renderActiveTab() {
-    if (state.tab === 'allocation') return renderAllocation();
+    if (state.tab === 'instruments') return renderInstruments();
     if (state.tab === 'flows') return renderFlows();
     if (state.tab === 'income') return renderIncome();
+    if (state.tab === 'controls') return renderControls();
     if (state.tab === 'transactions') return renderTransactions();
     return renderOverview();
   }
@@ -124,32 +126,32 @@ function portfolioDashboard() {
     return `
       <section class="kpi-grid">${renderKpis(metrics)}</section>
       <section class="panel-grid two">
-        ${analysisPanel('Lecture exécutive', executiveFindings(metrics))}
-        ${analysisPanel('Points de contrôle expert', controlFindings(metrics))}
+        ${analysisPanel('Données lues dans le PDF', directFindings())}
+        ${analysisPanel('Calculs effectués', calculatedFindings(metrics))}
       </section>
       <section class="panel-grid two">
-        ${chartPanel('Flux mensuels', 'Apports, achats et dépenses carte mois par mois.', 'monthly-flow')}
-        ${chartPanel('Solde cash', 'Solde de fin de mois reconstruit depuis chaque transaction.', 'cash-line')}
+        ${chartPanel('Flux mensuels calculés', 'Sommes mensuelles issues des transactions reconstruites.', 'monthly-flow')}
+        ${chartPanel('Solde après transactions', 'Dernier solde observé chaque mois dans le relevé.', 'cash-line')}
       </section>
       <section class="panel-grid two">
-        ${chartPanel('Coût net par classe', 'Allocation estimée au coût net, pas à la valeur de marché.', 'class-donut', 'legend-class')}
-        ${chartPanel('Top lignes au coût', 'Les 12 premières lignes expliquent l’essentiel du risque de concentration.', 'top-assets')}
+        ${chartPanel('Répartition par type de flux', 'Montants cumulés par catégories extraites des libellés.', 'category-donut', 'legend-category')}
+        ${chartPanel('Top ISIN au coût net', 'Achats moins ventes, uniquement pour les ISIN trouvés dans le PDF.', 'top-assets')}
       </section>`;
   }
 
-  function renderAllocation() {
+  function renderInstruments() {
     const metrics = derivedMetrics();
     return `
       <section class="panel-grid two">
-        ${analysisPanel('Diagnostic allocation', allocationFindings(metrics))}
-        ${analysisPanel('Ce que le relevé ne peut pas prouver', limitationFindings())}
+        ${analysisPanel('Lecture des instruments', instrumentFindings(metrics))}
+        ${analysisPanel('Données indisponibles', unavailableFindings())}
       </section>
       <section class="panel-grid two">
-        ${chartPanel('Exposition par thème', 'Regroupement par thème inféré depuis les noms d’instruments.', 'theme-bars')}
-        ${chartPanel('Concentration cumulée', 'Lecture du poids cumulé ligne par ligne.', 'concentration-bars')}
+        ${chartPanel('Coût net par ISIN', 'Achats portefeuille moins ventes portefeuille par identifiant trouvé.', 'top-assets-wide')}
+        ${chartPanel('Poids cumulé du coût net', 'Part cumulée des ISIN triés par coût net positif.', 'concentration-bars')}
       </section>
       <section class="data-panel">
-        <div class="panel-head"><h2>Lignes de portefeuille</h2><p>Triées par coût net investi.</p></div>
+        <div class="panel-head"><h2>Instruments trouvés</h2><p>ISIN, nom extrait, achats, ventes, dividendes et quantités quand le libellé les donne.</p></div>
         ${assetTable()}
       </section>`;
   }
@@ -158,12 +160,12 @@ function portfolioDashboard() {
     const metrics = derivedMetrics();
     return `
       <section class="panel-grid two">
-        ${analysisPanel('Cadence d’investissement', flowFindings(metrics))}
-        ${chartPanel('Carte de chaleur DCA', 'Chaque case représente un mois; plus c’est foncé, plus le montant acheté est élevé.', 'buy-heatmap')}
+        ${analysisPanel('Flux calculés', flowFindings(metrics))}
+        ${chartPanel('Mois avec achats', 'Intensité mensuelle des achats portefeuille calculés.', 'buy-heatmap')}
       </section>
       <section class="panel-grid two">
-        ${chartPanel('Apports vs déploiement', 'Comparaison des entrées de cash et de leur usage.', 'deployment-bars')}
-        ${chartPanel('Fin de mois cash', 'Niveau de cash conservé sur le compte.', 'monthly-cash-bars')}
+        ${chartPanel('Entrées et usages du cash', 'Totaux extraits ou calculés par type de transaction.', 'deployment-bars')}
+        ${chartPanel('Solde mensuel observé', 'Dernier solde disponible pour chaque mois.', 'monthly-cash-bars')}
       </section>
       <section class="data-panel">
         <div class="panel-head"><h2>Lecture mensuelle</h2><p>Apports, achats, ventes, carte, revenus et solde.</p></div>
@@ -180,8 +182,24 @@ function portfolioDashboard() {
         ${chartPanel('Marchands carte principaux', 'Dépenses carte détectées dans le relevé.', 'merchant-bars')}
       </section>
       <section class="panel-grid two">
-        ${analysisPanel('Qualité des revenus', incomeFindings(metrics))}
-        ${analysisPanel('Frais, taxes et bruit opérationnel', feeFindings(metrics))}
+        ${analysisPanel('Revenus calculés', incomeFindings(metrics))}
+        ${analysisPanel('Frais et taxes détectés', feeFindings(metrics))}
+      </section>`;
+  }
+
+  function renderControls() {
+    return `
+      <section class="panel-grid two">
+        ${analysisPanel('Données non inventées', unavailableFindings())}
+        ${analysisPanel('Couverture d’extraction', coverageFindings())}
+      </section>
+      <section class="data-panel">
+        <div class="panel-head"><h2>Rapprochement au relevé</h2><p>Comparaison entre le bloc Compte courant du PDF et les transactions reconstruites.</p></div>
+        ${reconciliationTable()}
+      </section>
+      <section class="panel-grid two">
+        ${auditTablePanel('Lu directement', data.audit.direct)}
+        ${auditFormulaPanel('Calculé', data.audit.calculated)}
       </section>`;
   }
 
@@ -203,28 +221,29 @@ function portfolioDashboard() {
 
   function renderKpis(metrics) {
     return [
-      kpi('Apports', data.summary.totalDeposits, 'Cash ajouté au compte'),
-      kpi('Achats portefeuille', data.summary.totalBuys, `${metrics.activeMonths}/${data.monthly.length} mois actifs`),
-      kpi('Coût net investi', metrics.netInvested, `${pct(metrics.netInvested, data.summary.totalDeposits)} des apports`),
-      kpi('Dépenses carte', data.summary.cardSpend, `${pct(data.summary.cardSpend, data.summary.totalDeposits)} des apports`),
-      kpi('Revenus passifs', data.summary.passiveIncome, 'Dividendes + intérêts'),
-      kpi('Bonus / saveback', data.summary.bonus, 'Récompenses et parrainage'),
-      kpi('Solde cash final', data.summary.finalBalance, 'Citibank au 30 avr. 2026'),
-      kpi('Frais + impôts', data.summary.accountFees + data.summary.taxes, `Frais déclarés: ${eur(data.summary.declaredFees)}`),
+      kpi('Solde initial PDF', data.summary.openingBalance, 'Bloc Compte courant'),
+      kpi('Entrées PDF', data.summary.expectedInflows, `Calculé: ${eur(data.summary.totalInflows)}`),
+      kpi('Sorties PDF', data.summary.expectedOutflows, `Calculé: ${eur(data.summary.totalOutflows)}`),
+      kpi('Solde final PDF', data.summary.expectedFinalBalance, `Calculé: ${eur(data.summary.finalBalance)}`),
+      kpi('Transactions', data.summary.transactionCount, `${data.coverage.pageCount || 'n/a'} pages lues`, 'integer'),
+      kpi('ISIN trouvés', data.coverage.assetCount, `${data.coverage.transactionsWithIsin} lignes avec ISIN`, 'integer'),
+      kpi('Coût net ISIN', metrics.netInvested, 'Achats - ventes par ISIN'),
+      kpi('Catégorie inconnue', data.coverage.unknownTransactionCount, 'Libellés non classés', 'integer'),
     ].join('');
   }
 
   function renderIncomeKpis(metrics) {
     return [
-      kpi('Dividendes', data.summary.dividends, `${pct(data.summary.dividends, metrics.netInvested)} du coût net`),
-      kpi('Intérêts cash', data.summary.interest, 'Rémunération du cash'),
-      kpi('Bonus / saveback', data.summary.bonus, 'Récompenses réinvestissables'),
-      kpi('Frais + taxes', data.summary.accountFees + data.summary.taxes, 'Bruit opérationnel identifié'),
+      kpi('Dividendes', data.summary.dividends, `${pct(data.summary.dividends, metrics.netInvested)} du coût net ISIN`),
+      kpi('Intérêts cash', data.summary.interest, 'Somme des lignes intérêts'),
+      kpi('Bonus / saveback', data.summary.bonus, 'Somme des lignes bonus'),
+      kpi('Frais + taxes', data.summary.accountFees + data.summary.taxes, `Frais déclarés: ${eur(data.summary.declaredFees)}`),
     ].join('');
   }
 
-  function kpi(label, value, note) {
-    return `<article class="kpi"><span>${esc(label)}</span><strong>${eur(value)}</strong><small>${esc(note)}</small></article>`;
+  function kpi(label, value, note, type = 'currency') {
+    const formatted = type === 'integer' ? int(value) : eur(value);
+    return `<article class="kpi"><span>${esc(label)}</span><strong>${esc(formatted)}</strong><small>${esc(note)}</small></article>`;
   }
 
   function analysisPanel(title, items) {
@@ -244,87 +263,115 @@ function portfolioDashboard() {
       </article>`;
   }
 
-  function executiveFindings(metrics) {
+  function directFindings() {
     return [
-      {
-        title: 'Compte hybride, pas pur courtage',
-        body: `${eur(data.summary.totalDeposits)} d’apports, ${eur(data.summary.totalBuys)} d’achats et ${eur(data.summary.cardSpend)} de dépenses carte. L’analyse doit donc isoler la carte avant de juger le portefeuille.`,
-        tone: 'warning',
-      },
-      {
-        title: 'Déploiement régulier',
-        body: `${metrics.activeMonths} mois avec achats sur ${data.monthly.length}; achat moyen mensuel ${eur(metrics.avgMonthlyBuy)}. Le comportement ressemble à du DCA actif plutôt qu’à quelques gros allers-retours.`,
-        tone: 'positive',
-      },
-      {
-        title: 'Concentration mesurable',
-        body: `Top 5 au coût net: ${formatNumber.format(metrics.topFiveWeight)} %. Première ligne: ${metrics.topAsset.name} à ${formatNumber.format(metrics.topAsset.weight)} %.`,
-        tone: metrics.topFiveWeight > 65 ? 'warning' : 'neutral',
-      },
+      { title: 'Période', body: data.summary.periodLabel || 'Période non trouvée dans le PDF.' },
+      { title: 'Totaux du PDF', body: `Solde initial ${eur(data.summary.openingBalance)}, entrées ${eur(data.summary.expectedInflows)}, sorties ${eur(data.summary.expectedOutflows)}, solde final ${eur(data.summary.expectedFinalBalance)}.` },
+      { title: 'Texte extrait', body: `${int(data.coverage.extractedLineCount)} fragments texte lus sur ${int(data.coverage.pageCount)} pages.` },
     ];
   }
 
-  function controlFindings(metrics) {
+  function calculatedFindings(metrics) {
     return [
-      { title: 'Rapprochement comptable', body: 'Entrées, sorties et solde final correspondent au relevé au centime.', tone: 'positive' },
-      { title: 'Ventes limitées', body: `${eur(data.summary.totalSells)} de ventes contre ${eur(data.summary.totalBuys)} d’achats. Le turnover apparent reste faible.`, tone: 'positive' },
-      { title: 'Revenus encore accessoires', body: `${eur(data.summary.passiveIncome)} de dividendes + intérêts, soit ${pct(data.summary.passiveIncome, metrics.netInvested)} du coût net.`, tone: 'neutral' },
+      { title: 'Montants transactionnels', body: `${data.summary.transactionCount} flux calculés par différence entre deux soldes consécutifs.` },
+      { title: 'Rapprochement', body: `Écarts: entrées ${eur(data.diagnostics.inflowDiff)}, sorties ${eur(data.diagnostics.outflowDiff)}, solde ${eur(data.diagnostics.finalBalanceDiff)}.`, tone: data.coverage.reconciled ? 'positive' : 'warning' },
+      { title: 'Coût net ISIN', body: `${eur(metrics.netInvested)} = achats portefeuille ${eur(data.summary.totalBuys)} - ventes portefeuille ${eur(data.summary.totalSells)}.` },
     ];
   }
 
-  function allocationFindings(metrics) {
-    const semis = metrics.themeBreakdown.find((item) => item.label === 'Semi-conducteurs / IA');
+  function instrumentFindings(metrics) {
     return [
-      { title: 'Biais croissance / technologie', body: `Nasdaq, semi-conducteurs, IA et grandes actions US forment le cœur du coût investi. Semi-conducteurs / IA: ${formatNumber.format(semis?.weight || 0)} %.`, tone: 'warning' },
-      { title: 'Socle diversifié présent', body: `Les ETF et ETP représentent ${formatNumber.format(metrics.classBreakdown.find((item) => item.label === 'ETF / ETP')?.weight || 0)} % du coût net positif.`, tone: 'positive' },
-      { title: 'Crypto contenue mais visible', body: `Crypto au coût net: ${formatNumber.format(metrics.classBreakdown.find((item) => item.label === 'Crypto')?.weight || 0)} %.`, tone: 'neutral' },
+      { title: 'Identifiants trouvés', body: `${data.coverage.assetCount} ISIN distincts et ${data.coverage.transactionsWithIsin} transactions rattachées à un ISIN.` },
+      { title: 'Quantités disponibles', body: `${data.coverage.transactionsWithQuantity} transactions contiennent une quantité explicite dans le libellé.` },
+      { title: 'Plus gros coût net', body: metrics.topAsset ? `${metrics.topAsset.name}: ${eur(metrics.topAsset.netInvested)} (${formatNumber.format(metrics.topAsset.weight)} % du coût net positif).` : 'Aucun ISIN avec coût net positif.' },
     ];
   }
 
-  function limitationFindings() {
-    return [
-      { title: 'Pas de performance réelle', body: 'Le PDF donne les flux cash, pas les cours actuels ni la valeur de marché des positions titres.' },
-      { title: 'Coût net, pas allocation actuelle', body: 'Les graphiques d’allocation sont une approximation par achats moins ventes, utile pour lire les paris pris.' },
-      { title: 'Quantités partielles', body: 'Les quantités sont présentes surtout sur les libellés récents; les anciennes exécutions n’en donnent pas toujours.' },
-    ];
+  function unavailableFindings() {
+    return data.audit.unavailable.map((item) => ({ title: item.label, body: item.reason, tone: 'warning' }));
   }
 
   function flowFindings(metrics) {
     return [
-      { title: 'Mois le plus chargé', body: `${metrics.peakBuy.month}: ${eur(metrics.peakBuy.buys)} d’achats portefeuille.`, tone: 'neutral' },
-      { title: 'Cash peu dormant en fin de période', body: `Solde final ${eur(data.summary.finalBalance)} face à ${eur(metrics.netInvested)} de coût net investi.`, tone: 'positive' },
-      { title: 'Carte à retraiter', body: `Les dépenses carte nettes représentent ${pct(data.summary.cardSpend - data.summary.cardRefunds, data.summary.totalDeposits)} des apports.`, tone: 'warning' },
+      { title: 'Mois avec le plus d’achats', body: metrics.peakBuy ? `${metrics.peakBuy.month}: ${eur(metrics.peakBuy.buys)} d’achats portefeuille.` : 'Aucun achat portefeuille détecté.' },
+      { title: 'Apports et retraits', body: `Apports ${eur(data.summary.totalDeposits)}, retraits ${eur(data.summary.totalWithdrawals)}.` },
+      { title: 'Carte', body: `Dépenses carte ${eur(data.summary.cardSpend)}, remboursements carte ${eur(data.summary.cardRefunds)}.` },
     ];
   }
 
   function incomeFindings(metrics) {
     return [
-      { title: 'Rendement cash faible mais croissant', body: `${eur(data.summary.dividends)} de dividendes et ${eur(data.summary.interest)} d’intérêts; le flux reste mineur par rapport aux achats.`, tone: 'neutral' },
-      { title: 'Saveback utile', body: `${eur(data.summary.bonus)} de bonus/saveback. C’est plus élevé que les dividendes purs sur la période.`, tone: 'positive' },
-      { title: 'Lecture fiscale incomplète', body: 'Les écritures fiscales visibles ne suffisent pas à produire une déclaration ou un calcul de plus-value.', tone: 'warning' },
+      { title: 'Dividendes', body: `${eur(data.summary.dividends)} sur ${metrics.dividendRows} lignes classées dividendes.` },
+      { title: 'Intérêts', body: `${eur(data.summary.interest)} sur ${metrics.interestRows} lignes classées intérêts.` },
+      { title: 'Bonus', body: `${eur(data.summary.bonus)} sur ${metrics.bonusRows} lignes classées bonus/saveback.` },
     ];
   }
 
   function feeFindings(metrics) {
     return [
-      { title: 'Frais explicites faibles', body: `${eur(data.summary.accountFees)} de frais comptabilisés et ${eur(data.summary.declaredFees)} de frais mentionnés dans certains libellés.`, tone: 'positive' },
-      { title: 'Impôts détectés', body: `${eur(data.summary.taxes)} d’écritures d’impôt/tax optimisation dans le cash ledger.`, tone: 'neutral' },
-      { title: 'Bruit opérationnel', body: 'Les achats carte, remboursements et cadeaux brouillent les apports si on ne les sépare pas du portefeuille.', tone: 'warning' },
+      { title: 'Frais comptabilisés', body: `${eur(data.summary.accountFees)} sur ${metrics.feeRows} lignes classées frais.` },
+      { title: 'Frais déclarés dans libellés', body: `${eur(data.summary.declaredFees)} extraits des mentions “fee:” présentes dans certains libellés.` },
+      { title: 'Taxes', body: `${eur(data.summary.taxes)} sur ${metrics.taxRows} lignes classées impôts/taxes.` },
     ];
+  }
+
+  function coverageFindings() {
+    return [
+      { title: 'Transactions', body: `${int(data.summary.transactionCount)} transactions reconstruites depuis les lignes du PDF.` },
+      { title: 'ISIN', body: `${int(data.coverage.transactionsWithIsin)} transactions contiennent un ISIN; ${int(data.coverage.assetCount)} ISIN distincts.` },
+      { title: 'Quantités', body: `${int(data.coverage.transactionsWithQuantity)} transactions contiennent une quantité explicite.` },
+      { title: 'Non classé', body: `${int(data.coverage.unknownTransactionCount)} transactions restent dans “Autres entrées/sorties”.`, tone: data.coverage.unknownTransactionCount ? 'warning' : 'positive' },
+    ];
+  }
+
+  function auditTablePanel(title, items) {
+    const body = items.map((item) => `
+      <tr>
+        <td>${esc(item.label)}</td>
+        <td>${formatAuditValue(item)}</td>
+        <td>${esc(item.source)}</td>
+      </tr>`).join('');
+    return `<article class="data-panel"><div class="panel-head"><h2>${esc(title)}</h2><p>Champs lus sans calcul métier.</p></div>${table(['Champ', 'Valeur', 'Source'], body)}</article>`;
+  }
+
+  function auditFormulaPanel(title, items) {
+    const body = items.map((item) => `
+      <tr>
+        <td>${esc(item.label)}</td>
+        <td>${esc(item.formula)}</td>
+        <td class="num">${item.count === null ? '—' : int(item.count)}</td>
+      </tr>`).join('');
+    return `<article class="data-panel"><div class="panel-head"><h2>${esc(title)}</h2><p>Formules transparentes appliquées aux données extraites.</p></div>${table(['Calcul', 'Formule', 'Nombre'], body)}</article>`;
+  }
+
+  function reconciliationTable() {
+    const rows = [
+      ['Entrées', data.summary.expectedInflows, data.summary.totalInflows, data.diagnostics.inflowDiff],
+      ['Sorties', data.summary.expectedOutflows, data.summary.totalOutflows, data.diagnostics.outflowDiff],
+      ['Solde final', data.summary.expectedFinalBalance, data.summary.finalBalance, data.diagnostics.finalBalanceDiff],
+    ].map(([label, pdf, calc, diff]) => `
+      <tr>
+        <td>${esc(label)}</td>
+        <td class="num">${eur(pdf)}</td>
+        <td class="num">${eur(calc)}</td>
+        <td class="num ${Math.abs(diff || 0) <= 0.01 ? 'pos' : 'neg'}">${eur(diff)}</td>
+      </tr>`).join('');
+    return table(['Contrôle', 'PDF', 'Calcul', 'Écart'], rows);
   }
 
   function assetTable() {
     const rows = data.assets.map((asset) => `
       <tr>
         <td><strong>${esc(asset.name)}</strong><span>${esc(asset.isin)}</span></td>
-        <td>${esc(asset.class)}</td>
-        <td>${esc(asset.theme)}</td>
         <td class="num">${eur(asset.buyAmount)}</td>
         <td class="num">${eur(asset.sellAmount)}</td>
+        <td class="num">${eur(asset.dividendAmount)}</td>
         <td class="num">${eur(asset.netInvested)}</td>
         <td class="num">${formatNumber.format(asset.weight)} %</td>
+        <td class="num">${asset.quantityRows ? formatQuantity(asset.quantityDelta) : '—'}</td>
+        <td class="num">${int(asset.transactionCount)}</td>
       </tr>`).join('');
-    return table(['Actif', 'Classe', 'Thème', 'Achats', 'Ventes', 'Coût net', 'Poids'], rows);
+    return table(['Actif', 'Achats', 'Ventes', 'Dividendes', 'Coût net', 'Poids', 'Qté calculée', 'Lignes'], rows);
   }
 
   function monthlyTable() {
@@ -361,10 +408,10 @@ function portfolioDashboard() {
     const metrics = derivedMetrics();
     mount('monthly-flow', flowChart());
     mount('cash-line', ChartKit.lineChart(data.monthly, { key: 'endBalance', color: '#65faca', label: (m) => shortMonth(m.month) }));
-    mount('class-donut', classDonut(metrics));
-    mountLegend('legend-class', metrics.classBreakdown);
-    mount('top-assets', ChartKit.horizontalBars(data.assets.slice(0, 12).map((a) => ({ label: a.name, value: a.netInvested })), { format: eur }));
-    mount('theme-bars', ChartKit.horizontalBars(metrics.themeBreakdown.map((t) => ({ label: t.label, value: t.value })), { format: eur }));
+    mount('category-donut', categoryDonut(metrics));
+    mountLegend('legend-category', metrics.operationBreakdown);
+    mount('top-assets', ChartKit.horizontalBars(topAssetItems(metrics).slice(0, 12), { format: eur }));
+    mount('top-assets-wide', ChartKit.horizontalBars(topAssetItems(metrics).slice(0, 18), { format: eur }));
     mount('concentration-bars', ChartKit.horizontalBars(concentrationItems().slice(0, 15), { format: (v) => `${formatNumber.format(v)} %` }));
     mount('buy-heatmap', ChartKit.heatmap(data.monthly));
     mount('deployment-bars', deploymentChart());
@@ -405,11 +452,15 @@ function portfolioDashboard() {
     ], { format: eur });
   }
 
-  function classDonut(metrics) {
-    return ChartKit.donutChart(metrics.classBreakdown.map((item) => ({ value: item.value })), {
-      centerTop: eur(metrics.netInvested),
-      centerBottom: 'coût net',
+  function categoryDonut(metrics) {
+    return ChartKit.donutChart(metrics.operationBreakdown.map((item) => ({ value: item.value })), {
+      centerTop: eur(metrics.totalOperationAmount),
+      centerBottom: 'flux classés',
     });
+  }
+
+  function topAssetItems(metrics) {
+    return metrics.positiveAssets.map((asset) => ({ label: asset.name, value: asset.netInvested }));
   }
 
   function mount(id, chart) {
@@ -465,6 +516,7 @@ function portfolioDashboard() {
         },
       });
       const meta = extractStatementMeta(lines);
+      if (meta.openingBalance === null) throw new Error('Solde initial introuvable dans le bloc Compte courant du PDF.');
       const transactions = extractTransactionsFromLines(lines, { openingBalance: meta.openingBalance });
       const analysis = buildAnalysis(transactions, meta);
 
@@ -533,29 +585,43 @@ function portfolioDashboard() {
   }
 
   function derivedMetrics() {
-    const netInvested = data.summary.totalBuys - data.summary.totalSells;
+    const netInvested = data.summary.netInvested;
     const positiveAssets = data.assets.filter((asset) => asset.netInvested > 0);
-    const classBreakdown = breakdown(positiveAssets, 'class');
-    const themeBreakdown = breakdown(positiveAssets, 'theme');
+    const operationBreakdown = operationItems();
     return {
       netInvested,
-      classBreakdown,
-      themeBreakdown,
-      topAsset: positiveAssets[0] || { name: 'n/a', weight: 0 },
+      positiveAssets,
+      operationBreakdown,
+      totalOperationAmount: operationBreakdown.reduce((total, item) => total + item.value, 0),
+      topAsset: positiveAssets[0] || null,
       topFiveWeight: positiveAssets.slice(0, 5).reduce((total, asset) => total + asset.weight, 0),
       activeMonths: data.monthly.filter((month) => month.buys > 0).length,
       avgMonthlyBuy: data.summary.totalBuys / Math.max(data.monthly.length, 1),
       peakBuy: [...data.monthly].sort((a, b) => b.buys - a.buys)[0],
+      dividendRows: countKind('dividend'),
+      interestRows: countKind('interest'),
+      bonusRows: countKind('bonus'),
+      feeRows: countKind('fee'),
+      taxRows: countKind('tax'),
     };
   }
 
-  function breakdown(items, key) {
-    const grouped = new Map();
-    items.forEach((item) => grouped.set(item[key], (grouped.get(item[key]) || 0) + item.netInvested));
-    const total = [...grouped.values()].reduce((sum, value) => sum + value, 0) || 1;
-    return [...grouped.entries()]
-      .map(([label, value]) => ({ label, value, weight: (value / total) * 100 }))
-      .sort((a, b) => b.value - a.value);
+  function operationItems() {
+    const items = [
+      { label: 'Achats portefeuille', value: data.summary.totalBuys },
+      { label: 'Ventes portefeuille', value: data.summary.totalSells },
+      { label: 'Apports', value: data.summary.totalDeposits },
+      { label: 'Retraits', value: data.summary.totalWithdrawals },
+      { label: 'Dépenses carte', value: data.summary.cardSpend },
+      { label: 'Revenus + bonus', value: data.summary.passiveIncome + data.summary.bonus },
+      { label: 'Frais + taxes', value: data.summary.accountFees + data.summary.taxes },
+    ].filter((item) => item.value > 0);
+    const total = items.reduce((sum, item) => sum + item.value, 0) || 1;
+    return items.map((item) => ({ ...item, weight: (item.value / total) * 100 }));
+  }
+
+  function countKind(kind) {
+    return data.transactions.filter((transaction) => transaction.kind === kind).length;
   }
 
   function concentrationItems() {
@@ -571,7 +637,21 @@ function portfolioDashboard() {
   }
 
   function eur(value) {
-    return formatEuro.format(value || 0);
+    return Number.isFinite(value) ? formatEuro.format(value) : 'Non trouvé';
+  }
+
+  function int(value) {
+    return Number.isFinite(value) ? new Intl.NumberFormat('fr-FR').format(value) : 'n/a';
+  }
+
+  function formatQuantity(value) {
+    return Number.isFinite(value) ? new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 6 }).format(value) : '—';
+  }
+
+  function formatAuditValue(item) {
+    if (typeof item.value === 'string') return esc(item.value);
+    if (item.key === 'pages') return int(item.value);
+    return esc(eur(item.value));
   }
 
   function shortMonth(month) {

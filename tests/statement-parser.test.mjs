@@ -3,7 +3,6 @@ import test from 'node:test';
 
 import {
   buildAnalysis,
-  classifyInstrument,
   extractTransactionsFromLines,
   parseCurrency,
 } from '../scripts/statement-parser.mjs';
@@ -45,9 +44,56 @@ test('extractTransactionsFromLines reconstructs split PDF rows and infers cash d
   assert.equal(transactions[0].kind, 'buy');
   assert.equal(transactions[0].asset.isin, 'IE00BLRPRL42');
   assert.equal(transactions[0].asset.quantity, 0.863036);
+  assert.equal('rawDescription' in transactions[0], false);
+  assert.equal('class' in transactions[0].asset, false);
+  assert.equal('theme' in transactions[0].asset, false);
   assert.equal(transactions[1].kind, 'card');
   assert.equal(transactions[1].amount, 14.7);
   assert.equal(transactions[1].balance, 13.13);
+});
+
+test('extractTransactionsFromLines masks transfer names next to bank identifiers', () => {
+  const lines = [
+    { page: 1, x: 74.44, y: 652.16, text: '04 avr. 2026' },
+    { page: 1, x: 74.44, y: 644.58, text: '2026' },
+    { page: 1, x: 101.48, y: 648.37, text: 'Virement Incoming transfer from Jean Dupont ZZ0012345678901234567890' },
+    { page: 1, x: 450.26, y: 648.37, text: '100,00 €' },
+  ];
+
+  const [transaction] = extractTransactionsFromLines(lines, { openingBalance: 0 });
+
+  assert.equal(transaction.description.includes('Jean'), false);
+  assert.equal(transaction.description.includes('Dupont'), false);
+  assert.equal(transaction.description.includes('ZZ0012345678901234567890'), false);
+  assert.equal(transaction.description.includes('Compte personnel'), true);
+});
+
+test('extractTransactionsFromLines keeps merchant names that are not bank identifiers', () => {
+  const lines = [
+    { page: 1, x: 74.44, y: 652.16, text: '30 avr. 2026' },
+    { page: 1, x: 74.44, y: 644.58, text: '2026' },
+    { page: 1, x: 101.48, y: 648.37, text: 'Avoir APPLE.COM/BILL' },
+    { page: 1, x: 450.26, y: 648.37, text: '102,99 € 195,75 €' },
+  ];
+
+  const [transaction] = extractTransactionsFromLines(lines, { openingBalance: 298.74 });
+
+  assert.equal(transaction.description, 'Avoir APPLE.COM/BILL');
+});
+
+test('extractTransactionsFromLines keeps instrument names that look like BIC codes', () => {
+  const lines = [
+    { page: 1, x: 74.44, y: 652.16, text: '08 nov. 2022' },
+    { page: 1, x: 74.44, y: 644.58, text: '2022' },
+    { page: 1, x: 101.48, y: 648.37, text: 'Exécution Buy trade US02079K3059 ALPHABET INC.CL.A DL-,001, quantity: 1' },
+    { page: 1, x: 450.26, y: 648.37, text: '100,00 €' },
+  ];
+
+  const [transaction] = extractTransactionsFromLines(lines, { openingBalance: 100 });
+
+  assert.equal(transaction.description.includes('ALPHABET'), true);
+  assert.equal(transaction.asset.name.includes('ALPHABET'), true);
+  assert.equal(transaction.description.includes('[BIC masqué]'), false);
 });
 
 test('buildAnalysis separates portfolio cost basis from card and cash flows', () => {
@@ -78,8 +124,6 @@ test('buildAnalysis separates portfolio cost basis from card and cash flows', ()
       asset: {
         isin: 'US67066G1040',
         name: 'NVIDIA CORP.',
-        class: 'Action',
-        theme: 'Semi-conducteurs / IA',
       },
     },
     {
@@ -117,10 +161,11 @@ test('buildAnalysis separates portfolio cost basis from card and cash flows', ()
   assert.equal(analysis.summary.passiveIncome, 2);
   assert.equal(analysis.assets[0].isin, 'US67066G1040');
   assert.equal(analysis.assets[0].netInvested, 300);
-});
-
-test('classifyInstrument recognizes ETFs, crypto proxies, and semiconductor exposure', () => {
-  assert.equal(classifyInstrument('IE00B3WJKG14', 'ISHSV-S+500INF.T. SECT.DLA').class, 'ETF / ETP');
-  assert.equal(classifyInstrument('XF000BTC0017', '').class, 'Crypto');
-  assert.equal(classifyInstrument('US67066G1040', 'NVIDIA CORP. DL-,001').theme, 'Semi-conducteurs / IA');
+  assert.equal(analysis.summary.netInvested, 300);
+  assert.equal('insights' in analysis, false);
+  assert.equal('class' in analysis.assets[0], false);
+  assert.equal('theme' in analysis.assets[0], false);
+  assert.equal(analysis.audit.direct.some((item) => item.key === 'period'), true);
+  assert.equal(analysis.audit.calculated.some((item) => item.key === 'transactionAmounts'), true);
+  assert.equal(analysis.audit.unavailable.some((item) => item.key === 'marketValue'), true);
 });

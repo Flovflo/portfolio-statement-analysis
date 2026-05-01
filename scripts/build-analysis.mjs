@@ -25,6 +25,9 @@ if (!pdfPath) {
 const pdfData = new Uint8Array(await readFile(pdfPath));
 const lines = await extractLinesFromPdfData(pdfData, pdfjs, { disableWorker: true });
 const meta = extractStatementMeta(lines);
+if (meta.openingBalance === null) {
+  throw new Error('Solde initial introuvable dans le bloc Compte courant du PDF.');
+}
 const transactions = extractTransactionsFromLines(lines, { openingBalance: meta.openingBalance });
 const analysis = buildAnalysis(transactions, meta);
 
