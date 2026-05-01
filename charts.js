@@ -1,6 +1,6 @@
 (function chartKit(global) {
   const NS = 'http://www.w3.org/2000/svg';
-  const COLORS = ['#65faca', '#cc490c', '#bb9136', '#84dc92', '#ffffff', '#9ac171', '#c38428', '#666970'];
+  const COLORS = ['#0088ff', '#16c253', '#e6714f', '#b855e7', '#ffb764', '#1cecbb', '#60a5fa', '#dd55e7'];
 
   function svg(width, height, className = 'chart') {
     const node = document.createElementNS(NS, 'svg');
@@ -92,7 +92,7 @@
       const y = 26 + index * 34;
       const width = (item.value / max) * 430;
       chart.append(text(clipLabel(item.label, 31), 16, y + 11, 'bar-label'));
-      chart.append(el('rect', { x: 250, y, width: 430, height: 12, rx: 2, fill: '#242424' }));
+      chart.append(el('rect', { x: 250, y, width: 430, height: 12, rx: 2, fill: '#1c1d1f' }));
       chart.append(el('rect', { x: 250, y, width, height: 12, rx: 2, fill: COLORS[index % COLORS.length] }));
       chart.append(text(options.format ? options.format(item.value) : item.value, 698, y + 11, 'axis-label'));
     });
@@ -118,7 +118,7 @@
     for (let step = 0; step <= 4; step += 1) {
       const y = margin.top + plot.height - (step / 4) * plot.height;
       const value = min + ((max - min) * step) / 4;
-      chart.append(el('line', { x1: margin.left, x2: margin.left + plot.width, y1: y, y2: y, stroke: '#242424', 'stroke-width': 1 }));
+      chart.append(el('line', { x1: margin.left, x2: margin.left + plot.width, y1: y, y2: y, stroke: '#1c1d1f', 'stroke-width': 1 }));
       chart.append(text(formatShort(value), 58, y + 4, 'axis-label', 'end'));
     }
   }
@@ -144,11 +144,11 @@
   }
 
   function heatColor(value) {
-    if (value > 0.72) return '#65faca';
-    if (value > 0.45) return '#9ac171';
-    if (value > 0.22) return '#bb9136';
-    if (value > 0.03) return '#cc490c';
-    return '#1a1a1a';
+    if (value > 0.72) return '#16c253';
+    if (value > 0.45) return '#0088ff';
+    if (value > 0.22) return '#b855e7';
+    if (value > 0.03) return '#001b33';
+    return '#1c1d1f';
   }
 
   function itemsPerLabel(count) {

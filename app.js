@@ -407,7 +407,7 @@ function portfolioDashboard() {
   function renderCharts() {
     const metrics = derivedMetrics();
     mount('monthly-flow', flowChart());
-    mount('cash-line', ChartKit.lineChart(data.monthly, { key: 'endBalance', color: '#65faca', label: (m) => shortMonth(m.month) }));
+    mount('cash-line', ChartKit.lineChart(data.monthly, { key: 'endBalance', color: '#16c253', label: (m) => shortMonth(m.month) }));
     mount('category-donut', categoryDonut(metrics));
     mountLegend('legend-category', metrics.operationBreakdown);
     mount('top-assets', ChartKit.horizontalBars(topAssetItems(metrics).slice(0, 12), { format: eur }));
@@ -415,7 +415,7 @@ function portfolioDashboard() {
     mount('concentration-bars', ChartKit.horizontalBars(concentrationItems().slice(0, 15), { format: (v) => `${formatNumber.format(v)} %` }));
     mount('buy-heatmap', ChartKit.heatmap(data.monthly));
     mount('deployment-bars', deploymentChart());
-    mount('monthly-cash-bars', ChartKit.barChart(data.monthly, { series: [{ key: 'endBalance', color: '#65faca' }], label: (m) => shortMonth(m.month) }));
+    mount('monthly-cash-bars', ChartKit.barChart(data.monthly, { series: [{ key: 'endBalance', color: '#16c253' }], label: (m) => shortMonth(m.month) }));
     mount('income-bars', incomeChart());
     mount('merchant-bars', ChartKit.horizontalBars(data.merchants.map((m) => ({ label: m.merchant, value: m.amount })), { format: eur }));
   }
@@ -423,9 +423,9 @@ function portfolioDashboard() {
   function flowChart() {
     return ChartKit.barChart(data.monthly, {
       series: [
-        { key: 'deposits', color: '#65faca' },
-        { key: 'buys', color: '#bb9136' },
-        { key: 'cardSpend', color: '#cc490c' },
+        { key: 'deposits', color: '#16c253' },
+        { key: 'buys', color: '#0088ff' },
+        { key: 'cardSpend', color: '#e6714f' },
       ],
       label: (m) => shortMonth(m.month),
     });
@@ -434,9 +434,9 @@ function portfolioDashboard() {
   function incomeChart() {
     return ChartKit.barChart(data.monthly, {
       series: [
-        { key: 'dividends', color: '#65faca' },
+        { key: 'dividends', color: '#16c253' },
         { key: 'interest', color: '#ffffff' },
-        { key: 'bonus', color: '#cc490c' },
+        { key: 'bonus', color: '#ffb764' },
       ],
       label: (m) => shortMonth(m.month),
     });
