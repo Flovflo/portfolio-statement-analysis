@@ -5,6 +5,7 @@ import {
   extractStatementMeta,
   extractTransactionsFromLines,
 } from './scripts/statement-parser.mjs';
+import { buildTradeCsvAnalysis } from './scripts/trade-csv-parser.mjs';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).toString();
 
@@ -44,7 +45,7 @@ function portfolioDashboard() {
       <section class="upload-hero">
         <div class="upload-copy">
           <h1>Terminal privé pour décoder ton relevé.</h1>
-          <p>Un parseur local lit le PDF dans ton navigateur, reconstruit les flux, rapproche les soldes, puis affiche uniquement les données trouvées ou calculées.</p>
+          <p>Un parseur local lit le PDF ou le CSV Trade Republic dans ton navigateur. Le CSV active une analyse trading complète: ordres, frais, P/L réalisé, positions et concentration.</p>
           <div class="upload-status ${uploadState.status}">
             <strong>${esc(statusTitle())}</strong>
             <span>${esc(uploadState.message)}</span>
@@ -53,16 +54,16 @@ function portfolioDashboard() {
         </div>
         <label class="drop-zone terminal-window" for="pdf-file" data-drop-zone>
           <div class="terminal-toolbar"><i></i><i></i><i></i><span>local-parser</span></div>
-          <input id="pdf-file" data-pdf-input type="file" accept="application/pdf,.pdf" ${busy ? 'disabled' : ''} />
-          <span class="terminal-prompt">run statement.pdf</span>
-          <strong>Choisir ou déposer le PDF</strong>
+          <input id="pdf-file" data-file-input type="file" accept="application/pdf,.pdf,text/csv,.csv" ${busy ? 'disabled' : ''} />
+          <span class="terminal-prompt">run export.csv</span>
+          <strong>Choisir ou déposer CSV/PDF</strong>
           <small>Tout reste dans ton navigateur. Aucune API, aucun upload serveur.</small>
         </label>
       </section>
       <section class="panel-grid three upload-notes">
         ${uploadNote('Static build', 'Compatible GitHub Pages: HTML, CSS, JS, PDF.js vendored.')}
-        ${uploadNote('Même format', 'Optimisé pour les relevés Trade Republic avec la même syntaxe PDF.')}
-        ${uploadNote('Audit local', 'Entrées, sorties et solde final sont rapprochés automatiquement.')}
+        ${uploadNote('CSV 23/23', 'Chaque colonne exportée est parsée, typée et auditée en couverture.')}
+        ${uploadNote('Trading first', 'Le CSV pilote les métriques d’ordres, positions, frais et P/L réalisé FIFO.')}
       </section>`;
   }
 
@@ -78,6 +79,7 @@ function portfolioDashboard() {
   }
 
   function renderHeader() {
+    if (isCsvReport()) return renderCsvHeader();
     const d = data.diagnostics;
     const ok = [d.inflowDiff, d.outflowDiff, d.finalBalanceDiff].every((value) => value === 0);
     return `
@@ -108,8 +110,44 @@ function portfolioDashboard() {
       </header>`;
   }
 
+  function renderCsvHeader() {
+    return `
+      <header class="topbar">
+        <div class="title-block">
+          <div class="meta-line">Transaction export / ${esc(data.summary.periodLabel)}</div>
+          <h1>Trading report du CSV.</h1>
+          <p>Analyse centrée sur les opérations de marché: tous les champs du CSV sont parsés, les champs cash restent en contexte, les champs sensibles sont masqués ou agrégés.</p>
+        </div>
+        <div class="header-actions">
+          <div class="terminal-window terminal-readout">
+            <div class="terminal-toolbar"><i></i><i></i><i></i><span>trading.csv</span></div>
+            <div class="audit-pill is-ok">
+              <span>parse --columns</span>
+              <strong>${int(data.meta.columnCount)}/${int(data.summary.csvColumnCount)} · OK</strong>
+            </div>
+            <div class="terminal-matrix">
+              <div><span>orders</span><strong>${int(data.summary.tradingRows)}</strong></div>
+              <div><span>assets</span><strong>${int(data.summary.assetsHeldByCost)}</strong></div>
+              <div><span>fifo pnl</span><strong>${eur(data.summary.realizedPnl)}</strong></div>
+            </div>
+          </div>
+          <label class="replace-file">
+            <input data-file-input type="file" accept="application/pdf,.pdf,text/csv,.csv" />
+            Importer un autre fichier
+          </label>
+        </div>
+      </header>`;
+  }
+
   function renderTabs() {
-    const tabs = [
+    const tabs = isCsvReport() ? [
+      ['overview', 'Trading'],
+      ['instruments', 'Positions'],
+      ['flows', 'Activité'],
+      ['income', 'P/L & frais'],
+      ['controls', 'Audit CSV'],
+      ['transactions', 'Ordres'],
+    ] : [
       ['overview', 'Synthèse'],
       ['instruments', 'Instruments'],
       ['flows', 'Flux'],
@@ -121,12 +159,100 @@ function portfolioDashboard() {
   }
 
   function renderActiveTab() {
+    if (isCsvReport()) return renderCsvActiveTab();
     if (state.tab === 'instruments') return renderInstruments();
     if (state.tab === 'flows') return renderFlows();
     if (state.tab === 'income') return renderIncome();
     if (state.tab === 'controls') return renderControls();
     if (state.tab === 'transactions') return renderTransactions();
     return renderOverview();
+  }
+
+  function renderCsvActiveTab() {
+    if (state.tab === 'instruments') return renderCsvPositions();
+    if (state.tab === 'flows') return renderCsvActivity();
+    if (state.tab === 'income') return renderCsvPerformance();
+    if (state.tab === 'controls') return renderCsvControls();
+    if (state.tab === 'transactions') return renderTransactions();
+    return renderCsvOverview();
+  }
+
+  function renderCsvOverview() {
+    return `
+      <section class="kpi-grid">${renderKpis()}</section>
+      <section class="panel-grid two">
+        ${analysisPanel('Lecture trading', csvTradingFindings())}
+        ${analysisPanel('Diagnostic exécution', csvExecutionFindings())}
+      </section>
+      <section class="panel-grid two">
+        ${chartPanel('Achats / ventes mensuels', 'Montants bruts issus des champs amount, fee, tax et type.', 'csv-monthly-trades')}
+        ${chartPanel('Allocation par classe', 'Coût ouvert estimé par asset_class, sans valeur de marché actuelle.', 'csv-asset-class-donut', 'legend-csv-asset-class')}
+      </section>
+      <section class="panel-grid two">
+        ${chartPanel('Top coût ouvert', 'Lots FIFO restants après ventes, frais et taxes inclus.', 'csv-top-open-cost')}
+        ${chartPanel('Friction par instrument', 'Frais + taxes explicites sur ordres BUY/SELL.', 'csv-fee-drag')}
+      </section>`;
+  }
+
+  function renderCsvPositions() {
+    return `
+      <section class="panel-grid two">
+        ${analysisPanel('Concentration', csvConcentrationFindings())}
+        ${analysisPanel('Limites volontairement non inventées', csvUnavailableFindings())}
+      </section>
+      <section class="panel-grid two">
+        ${chartPanel('Top positions au coût', 'Coût ouvert FIFO par instrument.', 'csv-top-open-cost-wide')}
+        ${chartPanel('Classes d’actifs', 'Répartition des coûts ouverts par asset_class.', 'csv-asset-class-bars')}
+      </section>
+      <section class="data-panel">
+        <div class="panel-head"><h2>Positions reconstruites</h2><p>Quantités, prix moyens, coût ouvert, ventes réalisées et revenus par instrument.</p></div>
+        ${csvAssetTable()}
+      </section>`;
+  }
+
+  function renderCsvActivity() {
+    return `
+      <section class="panel-grid two">
+        ${analysisPanel('Rythme d’investissement', csvActivityFindings())}
+        ${chartPanel('Types d’évènements', 'Toutes les valeurs du champ type, trading et cash inclus.', 'csv-type-bars')}
+      </section>
+      <section class="panel-grid two">
+        ${chartPanel('Montants mensuels', 'Achats, ventes et frais/taxes par mois.', 'csv-monthly-trades-wide')}
+        ${chartPanel('Apports cash contexte', 'Cash uniquement en support du trading.', 'csv-cash-context')}
+      </section>
+      <section class="data-panel">
+        <div class="panel-head"><h2>Activité mensuelle</h2><p>Ordres BUY/SELL, frais, taxes, revenus et apports cash par mois.</p></div>
+        ${csvMonthlyTable()}
+      </section>`;
+  }
+
+  function renderCsvPerformance() {
+    return `
+      <section class="kpi-grid compact">${renderCsvPerformanceKpis()}</section>
+      <section class="panel-grid two">
+        ${analysisPanel('P/L réalisé FIFO', csvPerformanceFindings())}
+        ${analysisPanel('Frais et taxes', csvFeeFindings())}
+      </section>
+      <section class="panel-grid two">
+        ${chartPanel('P/L réalisé positif', 'Uniquement les instruments avec ventes et P/L FIFO positif.', 'csv-realized-winners')}
+        ${chartPanel('Revenus instruments', 'Dividendes, distributions, perks et bonus liés aux instruments.', 'csv-income-assets')}
+      </section>`;
+  }
+
+  function renderCsvControls() {
+    return `
+      <section class="panel-grid two">
+        ${analysisPanel('100 % des champs parsés', csvCoverageFindings())}
+        ${analysisPanel('Protection données privées', csvPrivacyFindings())}
+      </section>
+      <section class="panel-grid two">
+        ${auditTablePanel('Lu directement', data.audit.direct)}
+        ${auditFormulaPanel('Calculé', data.audit.calculated)}
+      </section>
+      <section class="data-panel">
+        <div class="panel-head"><h2>Couverture des colonnes CSV</h2><p>Chaque colonne est lue, typée quand applicable, comptée et reliée à un usage analytique.</p></div>
+        ${csvFieldCoverageTable()}
+      </section>`;
   }
 
   function renderOverview() {
@@ -212,14 +338,16 @@ function portfolioDashboard() {
   }
 
   function renderTransactions() {
-    const categories = ['all', ...data.categories.map((item) => item.category)];
+    const categories = isCsvReport()
+      ? ['all', ...data.trading.types.filter((item) => ['BUY', 'SELL'].includes(item.label)).map((item) => item.label)]
+      : ['all', ...data.categories.map((item) => item.category)];
     const rows = filteredTransactions();
     return `
       <section class="data-panel">
         <div class="panel-head with-controls">
-          <div><h2>Journal reconstruit</h2><p id="transaction-count">${rows.length} transactions filtrées, affichage limité aux 300 plus récentes.</p></div>
+          <div><h2>${isCsvReport() ? 'Journal des ordres' : 'Journal reconstruit'}</h2><p id="transaction-count">${rows.length} transactions filtrées, affichage limité aux 300 plus récentes.</p></div>
           <div class="controls">
-            <select id="category-filter">${categories.map((cat) => `<option value="${esc(cat)}" ${state.category === cat ? 'selected' : ''}>${cat === 'all' ? 'Toutes catégories' : esc(cat)}</option>`).join('')}</select>
+            <select id="category-filter">${categories.map((cat) => `<option value="${esc(cat)}" ${state.category === cat ? 'selected' : ''}>${cat === 'all' ? 'Tous types' : esc(cat)}</option>`).join('')}</select>
             <input id="search-filter" type="search" value="${esc(state.search)}" placeholder="Chercher un actif, marchand, type..." />
           </div>
         </div>
@@ -228,6 +356,18 @@ function portfolioDashboard() {
   }
 
   function renderKpis(metrics) {
+    if (isCsvReport()) {
+      return [
+        kpi('Ordres trading', data.summary.tradingRows, `${data.summary.buyOrders} BUY · ${data.summary.sellOrders} SELL`, 'integer'),
+        kpi('Achats bruts', data.summary.grossBuys, `${data.summary.buyOrders} ordres BUY`),
+        kpi('Ventes brutes', data.summary.grossSells, `${data.summary.sellOrders} ordres SELL`),
+        kpi('Coût ouvert estimé', data.summary.openCostBasis, 'Lots FIFO restants'),
+        kpi('P/L réalisé FIFO', data.summary.realizedPnl, data.summary.realizedReturnPct === null ? 'Aucune vente matchée' : `${formatNumber.format(data.summary.realizedReturnPct)} % réalisé`),
+        kpi('Frais + taxes trading', data.summary.tradingFees + data.summary.tradingTaxes, `${formatNumber.format(data.summary.feeDragPct)} % des achats bruts`),
+        kpi('Actifs au coût', data.summary.assetsHeldByCost, `${data.summary.assetsTraded} instruments tradés`, 'integer'),
+        kpi('Top 5 concentration', data.summary.topFiveWeight, 'Poids du coût ouvert', 'percent'),
+      ].join('');
+    }
     return [
       kpi('Solde initial PDF', data.summary.openingBalance, 'Bloc Compte courant'),
       kpi('Entrées PDF', data.summary.expectedInflows, `Calculé: ${eur(data.summary.totalInflows)}`),
@@ -249,9 +389,26 @@ function portfolioDashboard() {
     ].join('');
   }
 
+  function renderCsvPerformanceKpis() {
+    return [
+      kpi('P/L réalisé', data.summary.realizedPnl, 'Produit net SELL - coût FIFO'),
+      kpi('Return réalisé', data.summary.realizedReturnPct, `${data.summary.roundTripCount} instruments vendus`, 'percentNullable'),
+      kpi('Win rate réalisé', data.summary.winRate, 'Sur instruments avec vente matchée', 'percentNullable'),
+      kpi('Friction trading', data.summary.tradingFees + data.summary.tradingTaxes, `${formatNumber.format(data.summary.feeDragPct)} % des achats bruts`),
+    ].join('');
+  }
+
   function kpi(label, value, note, type = 'currency') {
-    const formatted = type === 'integer' ? int(value) : eur(value);
+    const formatted = formatKpiValue(value, type);
     return `<article class="kpi"><span>${esc(label)}</span><strong>${esc(formatted)}</strong><small>${esc(note)}</small></article>`;
+  }
+
+  function formatKpiValue(value, type) {
+    if (type === 'integer') return int(value);
+    if (type === 'number') return Number.isFinite(value) ? formatNumber.format(value) : 'n/a';
+    if (type === 'percent') return Number.isFinite(value) ? `${formatNumber.format(value)} %` : 'n/a';
+    if (type === 'percentNullable') return Number.isFinite(value) ? `${formatNumber.format(value)} %` : 'Non calculable';
+    return eur(value);
   }
 
   function analysisPanel(title, items) {
@@ -269,6 +426,82 @@ function portfolioDashboard() {
         <div id="${chartId}" class="chart-slot"></div>
         ${legendId ? `<div id="${legendId}" class="legend"></div>` : ''}
       </article>`;
+  }
+
+  function csvTradingFindings() {
+    const peak = data.summary.peakBuyMonth;
+    return [
+      { title: 'Source CSV complète', body: `${int(data.summary.transactionCount)} lignes et ${int(data.meta.columnCount)} colonnes parsées. ${int(data.summary.tradingRows)} ordres BUY/SELL détectés.` },
+      { title: 'Comportement dominant', body: `${int(data.summary.buyOrders)} achats contre ${int(data.summary.sellOrders)} ventes: profil surtout accumulation, pas trading haute rotation.` },
+      { title: 'Mois le plus chargé', body: peak ? `${peak.month}: ${eur(peak.buyAmount)} d’achats bruts sur ${int(peak.buyCount)} ordres.` : 'Aucun mois avec achat.' },
+    ];
+  }
+
+  function csvExecutionFindings() {
+    return [
+      { title: 'Ticket moyen BUY', body: `${eur(data.summary.averageBuyOrder)} par achat, calculé depuis amount sur les lignes type=BUY.` },
+      { title: 'Friction explicite', body: `${eur(data.summary.tradingFees + data.summary.tradingTaxes)} de frais/taxes trading, soit ${formatNumber.format(data.summary.feeDragPct)} % des achats bruts.`, tone: data.summary.feeDragPct > 1 ? 'warning' : 'neutral' },
+      { title: 'P/L réalisé', body: data.summary.realizedReturnPct === null ? 'Pas assez de ventes matchées pour calculer un rendement réalisé.' : `${eur(data.summary.realizedPnl)} selon une méthode FIFO sur ${int(data.summary.roundTripCount)} instruments vendus.`, tone: data.summary.realizedPnl >= 0 ? 'positive' : 'warning' },
+    ];
+  }
+
+  function csvConcentrationFindings() {
+    const top = data.trading.assets.filter((asset) => asset.openCostBasis > 0)[0];
+    return [
+      { title: 'Coût ouvert', body: `${eur(data.summary.openCostBasis)} de coût restant reconstruit depuis BUY/SELL, frais et taxes inclus.` },
+      { title: 'Top 5', body: `${formatNumber.format(data.summary.topFiveWeight)} % du coût ouvert est concentré sur les 5 premières lignes.` },
+      { title: 'Première ligne', body: top ? `${top.name}: ${eur(top.openCostBasis)} (${formatNumber.format(top.openCostWeight)} % du coût ouvert).` : 'Aucune position ouverte au coût.' },
+    ];
+  }
+
+  function csvUnavailableFindings() {
+    return data.audit.unavailable.map((item) => ({ title: item.label, body: item.reason, tone: 'warning' }));
+  }
+
+  function csvActivityFindings() {
+    return [
+      { title: 'Mois actifs', body: `${int(data.summary.activeTradingMonths)} mois avec au moins un achat ou une vente.` },
+      { title: 'Évènements non cash', body: `${int(data.summary.deliveryEventCount)} livraisons et ${int(data.summary.corporateActionCount)} corporate actions parsées pour les quantités.` },
+      { title: 'FX présent', body: `${int(data.summary.fxRowCount)} lignes contiennent original_amount / original_currency / fx_rate.` },
+    ];
+  }
+
+  function csvPerformanceFindings() {
+    const realized = data.trading.assets.filter((asset) => asset.realizedCostBasis > 0).sort((a, b) => b.realizedPnl - a.realizedPnl);
+    const best = realized[0];
+    const worst = realized.at(-1);
+    return [
+      { title: 'Méthode', body: 'P/L réalisé = produit net des ventes moins coût FIFO des lots vendus, frais et taxes inclus quand fournis.' },
+      { title: 'Meilleur réalisé', body: best ? `${best.name}: ${eur(best.realizedPnl)} (${formatNumber.format(best.realizedReturnPct)} %).` : 'Aucune vente matchée.' },
+      { title: 'Pire réalisé', body: worst ? `${worst.name}: ${eur(worst.realizedPnl)} (${formatNumber.format(worst.realizedReturnPct)} %).` : 'Aucune vente matchée.' },
+    ];
+  }
+
+  function csvFeeFindings() {
+    const fees = [...data.trading.assets].sort((a, b) => (b.tradingFees + b.tradingTaxes) - (a.tradingFees + a.tradingTaxes))[0];
+    return [
+      { title: 'Total explicite', body: `${eur(data.summary.tradingFees)} de frais et ${eur(data.summary.tradingTaxes)} de taxes sur BUY/SELL.` },
+      { title: 'Instrument le plus coûteux', body: fees ? `${fees.name}: ${eur(fees.tradingFees + fees.tradingTaxes)} de frais/taxes.` : 'Aucun frais explicite.' },
+      { title: 'Lecture prudente', body: 'Les frais implicites de spread ne sont pas dans le CSV; ils ne sont donc pas inventés.' },
+    ];
+  }
+
+  function csvCoverageFindings() {
+    const full = data.trading.fieldCoverage.length === data.summary.csvColumnCount;
+    const sparse = data.trading.fieldCoverage.filter((field) => field.nonEmpty === 0).map((field) => field.field);
+    return [
+      { title: full ? '23/23 colonnes reconnues' : 'Colonnes partielles', body: `${int(data.trading.fieldCoverage.length)} colonnes auditées. Champs vides partout: ${sparse.length ? sparse.join(', ') : 'aucun'}.`, tone: full ? 'positive' : 'warning' },
+      { title: 'Colonnes numériques', body: 'shares, price, amount, fee, tax, original_amount et fx_rate sont typés en nombres quand présents.' },
+      { title: 'Colonnes d’identité', body: 'transaction_id sert à la couverture/déduplication; counterparty_* est parsé mais non affiché brut.' },
+    ];
+  }
+
+  function csvPrivacyFindings() {
+    return [
+      { title: 'On-device', body: 'CSV lu dans le navigateur: aucun upload serveur, aucune API externe.' },
+      { title: 'Champs sensibles', body: `${int(data.cash.counterpartyRows)} lignes contiennent contrepartie/IBAN: elles sont comptées, pas exposées dans les tableaux trading.` },
+      { title: 'Transactions affichées', body: 'Le journal CSV affiché est centré sur les ordres BUY/SELL et exclut les champs IBAN/contrepartie bruts.' },
+    ];
   }
 
   function directFindings() {
@@ -382,6 +615,50 @@ function portfolioDashboard() {
     return table(['Actif', 'Achats', 'Ventes', 'Dividendes', 'Coût net', 'Poids', 'Qté calculée', 'Lignes'], rows);
   }
 
+  function csvAssetTable() {
+    const rows = data.trading.assets.map((asset) => `
+      <tr>
+        <td><strong>${esc(asset.name)}</strong><span>${esc(asset.symbol)} · ${esc(asset.assetClass)}</span></td>
+        <td class="num">${formatQuantity(asset.netQuantity)}</td>
+        <td class="num">${eur(asset.openCostBasis)}</td>
+        <td class="num">${formatNumber.format(asset.openCostWeight)} %</td>
+        <td class="num">${asset.avgBuyPrice === null ? '—' : eur(asset.avgBuyPrice)}</td>
+        <td class="num">${eur(asset.buyCash)}</td>
+        <td class="num">${eur(asset.sellCash)}</td>
+        <td class="num ${asset.realizedPnl >= 0 ? 'pos' : 'neg'}">${eur(asset.realizedPnl)}</td>
+        <td class="num">${eur(asset.tradingFees + asset.tradingTaxes)}</td>
+        <td class="num">${int(asset.tradeCount)}</td>
+      </tr>`).join('');
+    return table(['Instrument', 'Qté nette', 'Coût ouvert', 'Poids', 'Prix moyen buy', 'Cash buy', 'Cash sell', 'P/L FIFO', 'Frais+taxes', 'Ordres'], rows);
+  }
+
+  function csvMonthlyTable() {
+    const rows = data.trading.monthly.map((month) => `
+      <tr>
+        <td>${esc(month.month)}</td>
+        <td class="num">${eur(month.buyAmount)}</td>
+        <td class="num">${eur(month.sellAmount)}</td>
+        <td class="num">${eur(month.tradingFees + month.tradingTaxes)}</td>
+        <td class="num">${int(month.buyCount)}</td>
+        <td class="num">${int(month.sellCount)}</td>
+        <td class="num">${eur(month.dividendIncome)}</td>
+        <td class="num">${eur(month.cashContribution)}</td>
+        <td class="num">${int(month.investmentEventCount)}</td>
+      </tr>`).join('');
+    return table(['Mois', 'Achats', 'Ventes', 'Frais+taxes', 'BUY', 'SELL', 'Revenus', 'Apports cash', 'Events'], rows);
+  }
+
+  function csvFieldCoverageTable() {
+    const rows = data.trading.fieldCoverage.map((field) => `
+      <tr>
+        <td><strong>${esc(field.field)}</strong><span>${esc(field.usedFor)}</span></td>
+        <td class="num">${int(field.nonEmpty)}</td>
+        <td class="num">${int(field.empty)}</td>
+        <td class="num">${formatNumber.format(field.coveragePct)} %</td>
+      </tr>`).join('');
+    return table(['Colonne', 'Non vide', 'Vide', 'Couverture'], rows);
+  }
+
   function monthlyTable() {
     const rows = data.monthly.map((month) => `
       <tr>
@@ -397,6 +674,7 @@ function portfolioDashboard() {
   }
 
   function transactionTable(rows) {
+    if (isCsvReport()) return csvTradingTable(rows);
     const body = rows.map((tx) => `
       <tr>
         <td>${esc(tx.date)}</td>
@@ -408,11 +686,31 @@ function portfolioDashboard() {
     return table(['Date', 'Catégorie', 'Libellé', 'Flux', 'Solde'], body);
   }
 
+  function csvTradingTable(rows) {
+    const body = rows.map((tx) => `
+      <tr>
+        <td>${esc(tx.date)}</td>
+        <td><span class="tag">${esc(tx.type)}</span></td>
+        <td><strong>${esc(tx.name)}</strong><span>${esc(tx.symbol)} · ${esc(tx.assetClass)}</span></td>
+        <td class="num">${formatQuantity(tx.shares)}</td>
+        <td class="num">${tx.price === null ? '—' : eur(tx.price)}</td>
+        <td class="num ${tx.amount >= 0 ? 'pos' : 'neg'}">${eur(tx.amount)}</td>
+        <td class="num">${tx.fee === null ? '—' : eur(tx.fee)}</td>
+        <td class="num">${tx.tax === null ? '—' : eur(tx.tax)}</td>
+        <td class="num">${eur(tx.cashImpact)}</td>
+      </tr>`).join('');
+    return table(['Date', 'Type', 'Instrument', 'Shares', 'Price', 'Amount', 'Fee', 'Tax', 'Cash impact'], body);
+  }
+
   function table(headers, body) {
     return `<div class="table-wrap"><table><thead><tr>${headers.map((header) => `<th>${esc(header)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
   }
 
   function renderCharts() {
+    if (isCsvReport()) {
+      renderCsvCharts();
+      return;
+    }
     const metrics = derivedMetrics();
     mount('monthly-flow', flowChart());
     mount('cash-line', ChartKit.lineChart(data.monthly, { key: 'endBalance', color: '#19d0e8', label: (m) => shortMonth(m.month) }));
@@ -426,6 +724,74 @@ function portfolioDashboard() {
     mount('monthly-cash-bars', ChartKit.barChart(data.monthly, { series: [{ key: 'endBalance', color: '#19d0e8' }], label: (m) => shortMonth(m.month) }));
     mount('income-bars', incomeChart());
     mount('merchant-bars', ChartKit.horizontalBars(data.merchants.map((m) => ({ label: m.merchant, value: m.amount })), { format: eur }));
+  }
+
+  function renderCsvCharts() {
+    mount('csv-monthly-trades', csvMonthlyTradeChart());
+    mount('csv-monthly-trades-wide', csvMonthlyTradeChart());
+    mount('csv-asset-class-donut', csvAssetClassDonut());
+    mountLegend('legend-csv-asset-class', data.trading.assetClasses.map((item) => ({ label: item.assetClass, weight: item.weight })));
+    mount('csv-top-open-cost', ChartKit.horizontalBars(csvTopOpenCostItems().slice(0, 12), { format: eur }));
+    mount('csv-top-open-cost-wide', ChartKit.horizontalBars(csvTopOpenCostItems().slice(0, 18), { format: eur }));
+    mount('csv-fee-drag', ChartKit.horizontalBars(csvFeeItems().slice(0, 12), { format: eur }));
+    mount('csv-asset-class-bars', ChartKit.horizontalBars(data.trading.assetClasses.map((item) => ({ label: item.assetClass, value: item.openCostBasis })), { format: eur }));
+    mount('csv-type-bars', ChartKit.horizontalBars(data.trading.types.slice(0, 14).map((item) => ({ label: item.label, value: item.count })), { format: int }));
+    mount('csv-cash-context', ChartKit.horizontalBars(csvCashItems(), { format: eur }));
+    mount('csv-realized-winners', ChartKit.horizontalBars(csvRealizedWinnerItems().slice(0, 10), { format: eur }));
+    mount('csv-income-assets', ChartKit.horizontalBars(csvIncomeAssetItems().slice(0, 10), { format: eur }));
+  }
+
+  function csvMonthlyTradeChart() {
+    return ChartKit.barChart(data.trading.monthly, {
+      series: [
+        { key: 'buyAmount', color: '#19d0e8' },
+        { key: 'sellAmount', color: '#44ccff' },
+        { key: 'tradingFees', color: '#ffffff' },
+      ],
+      label: (m) => shortMonth(m.month),
+    });
+  }
+
+  function csvAssetClassDonut() {
+    return ChartKit.donutChart(data.trading.assetClasses.map((item) => ({ value: item.openCostBasis })), {
+      centerTop: eur(data.summary.openCostBasis),
+      centerBottom: 'coût ouvert',
+    });
+  }
+
+  function csvTopOpenCostItems() {
+    return data.trading.assets.filter((asset) => asset.openCostBasis > 0).map((asset) => ({ label: asset.name, value: asset.openCostBasis }));
+  }
+
+  function csvFeeItems() {
+    return data.trading.assets
+      .map((asset) => ({ label: asset.name, value: asset.tradingFees + asset.tradingTaxes }))
+      .filter((item) => item.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }
+
+  function csvRealizedWinnerItems() {
+    return data.trading.assets
+      .filter((asset) => asset.realizedPnl > 0)
+      .map((asset) => ({ label: asset.name, value: asset.realizedPnl }))
+      .sort((a, b) => b.value - a.value);
+  }
+
+  function csvIncomeAssetItems() {
+    return data.trading.assets
+      .filter((asset) => asset.income > 0)
+      .map((asset) => ({ label: asset.name, value: asset.income }))
+      .sort((a, b) => b.value - a.value);
+  }
+
+  function csvCashItems() {
+    return [
+      { label: 'Apports', value: data.cash.deposits },
+      { label: 'Carte', value: data.cash.cardSpend },
+      { label: 'Dividendes', value: data.cash.dividends },
+      { label: 'Intérêts', value: data.cash.interest },
+      { label: 'Bonus/perks', value: data.cash.bonus },
+    ].filter((item) => item.value > 0);
   }
 
   function flowChart() {
@@ -484,10 +850,17 @@ function portfolioDashboard() {
   }
 
   function bindUploadControls() {
+    document.querySelectorAll('[data-file-input]').forEach((input) => {
+      input.addEventListener('change', () => {
+        const file = input.files?.[0];
+        if (file) void processInputFile(file);
+      });
+    });
+
     document.querySelectorAll('[data-pdf-input]').forEach((input) => {
       input.addEventListener('change', () => {
         const file = input.files?.[0];
-        if (file) void processPdfFile(file);
+        if (file) void processInputFile(file);
       });
     });
 
@@ -500,10 +873,51 @@ function portfolioDashboard() {
       zone.addEventListener('drop', (event) => {
         event.preventDefault();
         zone.classList.remove('is-dragging');
-        const file = [...(event.dataTransfer?.files || [])].find((candidate) => candidate.type === 'application/pdf' || candidate.name.toLowerCase().endsWith('.pdf'));
-        if (file) void processPdfFile(file);
+        const file = [...(event.dataTransfer?.files || [])].find((candidate) => supportedInputFile(candidate));
+        if (file) void processInputFile(file);
       });
     });
+  }
+
+  async function processInputFile(file) {
+    if (isCsvFile(file)) {
+      await processCsvFile(file);
+      return;
+    }
+    if (isPdfFile(file)) {
+      await processPdfFile(file);
+      return;
+    }
+    uploadState.status = 'error';
+    uploadState.message = 'Format non supporté: importe un PDF de relevé ou un CSV Transaction export Trade Republic.';
+    render();
+  }
+
+  async function processCsvFile(file) {
+    uploadState.status = 'processing';
+    uploadState.fileName = file.name;
+    uploadState.fileSize = file.size;
+    uploadState.message = `Lecture du CSV ${file.name} (${formatBytes(file.size)}).`;
+    data = null;
+    render();
+
+    try {
+      const text = await file.text();
+      const analysis = buildTradeCsvAnalysis(text, { fileName: file.name });
+      validateCsvAnalysis(analysis);
+      data = analysis;
+      state.tab = 'overview';
+      state.category = 'all';
+      state.search = '';
+      uploadState.status = 'done';
+      uploadState.message = `${analysis.summary.tradingRows} ordres trading et ${analysis.summary.transactionCount} lignes CSV parsés depuis ${file.name}.`;
+      render();
+    } catch (error) {
+      uploadState.status = 'error';
+      uploadState.message = error instanceof Error ? error.message : String(error);
+      data = null;
+      render();
+    }
   }
 
   async function processPdfFile(file) {
@@ -559,6 +973,13 @@ function portfolioDashboard() {
     }
   }
 
+  function validateCsvAnalysis(analysis) {
+    if (analysis.sourceType !== 'csv') throw new Error('Analyse CSV invalide.');
+    if (analysis.meta.columnCount < analysis.summary.csvColumnCount) throw new Error('CSV incomplet: toutes les colonnes attendues ne sont pas présentes.');
+    if (analysis.summary.transactionCount === 0) throw new Error('Aucune ligne reconnue dans ce CSV.');
+    if (analysis.summary.tradingRows === 0) throw new Error('Aucun ordre BUY/SELL trouvé dans ce CSV.');
+  }
+
   function bindTabs() {
     document.querySelectorAll('[data-tab]').forEach((button) => {
       button.addEventListener('click', () => {
@@ -579,15 +1000,19 @@ function portfolioDashboard() {
     const rows = filteredTransactions();
     const count = document.getElementById('transaction-count');
     const slot = document.getElementById('transaction-table-slot');
-    if (count) count.textContent = `${rows.length} transactions filtrées, affichage limité aux 300 plus récentes.`;
+    if (count) count.textContent = `${rows.length} ${isCsvReport() ? 'ordres' : 'transactions'} filtrés, affichage limité aux 300 plus récents.`;
     if (slot) slot.innerHTML = transactionTable(rows.slice(0, 300));
   }
 
   function filteredTransactions() {
     const query = state.search.trim().toLowerCase();
-    return [...data.transactions].reverse().filter((tx) => {
-      const categoryOk = state.category === 'all' || tx.category === state.category;
-      const queryOk = !query || `${tx.description} ${tx.category} ${tx.asset?.name || ''} ${tx.asset?.isin || ''}`.toLowerCase().includes(query);
+    const source = isCsvReport() ? data.trading.transactions : data.transactions;
+    return [...source].reverse().filter((tx) => {
+      const categoryOk = state.category === 'all' || (isCsvReport() ? tx.type === state.category : tx.category === state.category);
+      const haystack = isCsvReport()
+        ? `${tx.type} ${tx.name} ${tx.symbol} ${tx.assetClass} ${tx.description}`
+        : `${tx.description} ${tx.category} ${tx.asset?.name || ''} ${tx.asset?.isin || ''}`;
+      const queryOk = !query || haystack.toLowerCase().includes(query);
       return categoryOk && queryOk;
     });
   }
@@ -658,6 +1083,7 @@ function portfolioDashboard() {
 
   function formatAuditValue(item) {
     if (typeof item.value === 'string') return esc(item.value);
+    if (isCsvReport() && ['rows', 'tradingRows'].includes(item.key)) return int(item.value);
     if (item.key === 'pages') return int(item.value);
     return esc(eur(item.value));
   }
@@ -668,6 +1094,22 @@ function portfolioDashboard() {
 
   function formatBytes(bytes) {
     return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(bytes / 1024 / 1024) + ' Mo';
+  }
+
+  function isCsvReport() {
+    return data?.sourceType === 'csv';
+  }
+
+  function supportedInputFile(file) {
+    return isPdfFile(file) || isCsvFile(file);
+  }
+
+  function isPdfFile(file) {
+    return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  }
+
+  function isCsvFile(file) {
+    return file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv');
   }
 
   function esc(value) {
